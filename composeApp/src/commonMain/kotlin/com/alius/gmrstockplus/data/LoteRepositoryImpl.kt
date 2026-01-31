@@ -1,39 +1,40 @@
 package com.alius.gmrstockplus.data
 
+import com.alius.gmrstockplus.data.firestore.FirebaseClient
 import com.alius.gmrstockplus.domain.model.*
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.*
-import dev.gitlive.firebase.app
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.plus
-import kotlinx.datetime.Clock
-import kotlinx.datetime.toLocalDateTime
+import kotlinx.datetime.*
 
-class LoteRepositoryImpl(plantName: String) : LoteRepository {
+class LoteRepositoryImpl(private val plantName: String) : LoteRepository {
 
-    private val firestore = Firebase.firestore(Firebase.app(plantName))
-    private val loteCollection = firestore.collection("lote")
+    // 1. Usamos el FirebaseClient centralizado con 'by lazy'
+    // Esto evita que iOS busque una App inexistente al instanciar el repo
+    private val firestore by lazy {
+        if (plantName == "P08") FirebaseClient.db08 else FirebaseClient.db07
+    }
 
-    // --- FUNCIÓN DE MAPEO MANUAL (Idéntica a la solución de Filtros) ---
+    // 2. La colección se inicializa solo cuando se accede a ella
+    private val loteCollection by lazy {
+        firestore.collection("lote")
+    }
+
+    // --- FUNCIÓN DE MAPEO MANUAL ---
 
     private fun DocumentSnapshot.toLoteModelSafe(): LoteModel? {
         return try {
-            // 1. Mapeo básico de los datos
+            // Mapeo básico
             val lote = this.data<LoteModel>()
 
-            // 2. Extracción manual de los Timestamps de Firebase
+            // Extracción manual de Timestamps (específico de GitLive Firebase)
             val firebaseDate = try { this.get<Timestamp>("date") } catch (e: Exception) { null }
             val firebaseCreatedAt = try { this.get<Timestamp>("createdAt") } catch (e: Exception) { null }
             val firebaseDateBooked = try { this.get<Timestamp>("dateBooked") } catch (e: Exception) { null }
 
-            // 3. Inyectamos los Instants corregidos en el modelo mediante copy()
+            // Reconstrucción del modelo con IDs e Instants corregidos
             lote.copy(
                 id = this.id,
                 date = firebaseDate?.let { Instant.fromEpochSeconds(it.seconds, it.nanoseconds) } ?: lote.date,
@@ -41,7 +42,7 @@ class LoteRepositoryImpl(plantName: String) : LoteRepository {
                 dateBooked = firebaseDateBooked?.let { Instant.fromEpochSeconds(it.seconds, it.nanoseconds) } ?: lote.dateBooked
             )
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error crítico mapeando lote ${this.id}: ${e.message}")
+            println("❌ [GmrStockPlus] Error mapeando lote ${this.id}: ${e.message}")
             null
         }
     }
@@ -56,6 +57,7 @@ class LoteRepositoryImpl(plantName: String) : LoteRepository {
                 .get()
             snapshot.documents.mapNotNull { it.toLoteModelSafe() }
         } catch (e: Exception) {
+            println("❌ Error listarLotes: ${e.message}")
             emptyList()
         }
     }

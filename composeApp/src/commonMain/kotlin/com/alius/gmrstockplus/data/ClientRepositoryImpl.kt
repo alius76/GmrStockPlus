@@ -1,28 +1,31 @@
 package com.alius.gmrstockplus.data
 
+import com.alius.gmrstockplus.data.firestore.FirebaseClient
 import com.alius.gmrstockplus.domain.model.Cliente
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.firestore.firestore
-import dev.gitlive.firebase.app
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
 
-class ClientRepositoryImpl(plantName: String) : ClientRepository {
+class ClientRepositoryImpl(private val plantName: String) : ClientRepository {
 
-    // Accedemos a la instancia de la planta seleccionada (P07 o P08)
-    // inicializada previamente en FirebaseFactory
-    private val firestore = Firebase.firestore(Firebase.app(plantName))
-    private val clientCollection = firestore.collection("cliente")
+    // 1. Usamos 'by lazy' para que no intente buscar la App hasta que realmente
+    // necesitemos los datos. Esto evita crashes al abrir la pantalla.
+    private val firestore by lazy {
+        if (plantName == "P08") FirebaseClient.db08 else FirebaseClient.db07
+    }
+
+    // 2. La colección también debe ser lazy
+    private val clientCollection by lazy {
+        firestore.collection("cliente")
+    }
 
     override suspend fun getAllClientsOrderedByName(): List<Cliente> = withContext(Dispatchers.IO) {
         try {
-            // orderBy y get() reemplazan el structuredQuery de la API REST
+            // Aquí es donde se activa el 'lazy' por primera vez
             val snapshot = clientCollection.orderBy("cliNombre").get()
-            // ✅ Especificamos <Cliente> para que el serializador sepa qué clase construir
             snapshot.documents.map { it.data<Cliente>() }
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error Firestore (GetAll): ${e.message}")
+            println("❌ [GmrStockPlus] Error Firestore (GetAll en $plantName): ${e.message}")
             emptyList()
         }
     }
@@ -30,41 +33,37 @@ class ClientRepositoryImpl(plantName: String) : ClientRepository {
     override suspend fun getAllClientsWithIds(): List<Pair<String, Cliente>> = withContext(Dispatchers.IO) {
         try {
             val snapshot = clientCollection.orderBy("cliNombre").get()
-            // ✅ it.id extrae el nombre del documento e it.data<Cliente>() el contenido
             snapshot.documents.map { it.id to it.data<Cliente>() }
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error Firestore (WithIds): ${e.message}")
+            println("❌ [GmrStockPlus] Error (WithIds en $plantName): ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun addClient(cliente: Cliente): String = withContext(Dispatchers.IO) {
         try {
-            // .add() sube el objeto y genera el Document ID de Firebase automáticamente
             val docRef = clientCollection.add(cliente)
             docRef.id
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error Firestore (Add): ${e.message}")
+            println("❌ [GmrStockPlus] Error (Add en $plantName): ${e.message}")
             throw e
         }
     }
 
     override suspend fun updateClient(documentId: String, cliente: Cliente): Unit = withContext(Dispatchers.IO) {
         try {
-            // .set() sobrescribe el documento con el nuevo objeto Cliente
             clientCollection.document(documentId).set(cliente)
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error Firestore (Update): ${e.message}")
+            println("❌ [GmrStockPlus] Error (Update en $plantName): ${e.message}")
             throw e
         }
     }
 
     override suspend fun deleteClient(documentId: String): Unit = withContext(Dispatchers.IO) {
         try {
-            // Elimina el documento físico de la colección
             clientCollection.document(documentId).delete()
         } catch (e: Exception) {
-            println("❌ [GmrStockPlus] Error Firestore (Delete): ${e.message}")
+            println("❌ [GmrStockPlus] Error (Delete en $plantName): ${e.message}")
             throw e
         }
     }
