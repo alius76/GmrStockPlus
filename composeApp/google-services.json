@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "983598044129",
+    "project_id": "firestoreavanzadocompose-62d26",
+    "storage_bucket": "firestoreavanzadocompose-62d26.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:983598044129:android:db05f09097f508faca38a0",
+        "android_client_info": {
+          "package_name": "com.alius.antex"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAt5zKICoaw7Q7YOMXxgPqZ6dMG_8EYYl0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:983598044129:android:63e44657a603720eca38a0",
+        "android_client_info": {
+          "package_name": "com.alius.gmrstock"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAt5zKICoaw7Q7YOMXxgPqZ6dMG_8EYYl0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:983598044129:android:5bee193d989afcfdca38a0",
+        "android_client_info": {
+          "package_name": "com.alius.gmrstockplus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAt5zKICoaw7Q7YOMXxgPqZ6dMG_8EYYl0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
