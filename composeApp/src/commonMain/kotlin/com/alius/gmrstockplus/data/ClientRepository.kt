@@ -11,4 +11,7 @@ interface ClientRepository {
 }
 
 
+expect fun getClientRepository(plantName: String): ClientRepository
+
+
 

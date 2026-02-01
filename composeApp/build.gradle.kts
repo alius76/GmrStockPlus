@@ -86,6 +86,9 @@ kotlin {
             implementation(libs.gitlive.firebase.firestore)
             implementation(libs.gitlive.firebase.auth)
 
+            // Para recordar el email en el loggin
+            implementation(libs.multiplatform.settings.no.arg.v111)
+
         }
 
         iosMain.dependencies {

@@ -36,3 +36,4 @@ interface LoteRepository {
     suspend fun listarLotesPorDescripcion(descripcion: String): List<LoteModel>
 }
 
+expect fun getLoteRepository(plantName: String): LoteRepository

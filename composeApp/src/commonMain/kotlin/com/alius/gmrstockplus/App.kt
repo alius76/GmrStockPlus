@@ -1,28 +1,36 @@
 package com.alius.gmrstockplus
 
-
-import androidx.compose.material3.MaterialTheme
-
-import androidx.compose.runtime.*
-import com.alius.gmrstockplus.presentation.screens.ClientValidationScreen
-
-import com.alius.gmrstockplus.presentation.screens.LoteValidationScreen
-import org.jetbrains.compose.ui.tooling.preview.Preview
+import androidx.compose.material.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import cafe.adriel.voyager.navigator.CurrentScreen
+import cafe.adriel.voyager.navigator.Navigator
+import cafe.adriel.voyager.navigator.NavigatorDisposeBehavior
+import com.alius.gmrstockplus.presentation.screens.RootScreen
+import io.github.aakira.napier.DebugAntilog
+import io.github.aakira.napier.Napier
 
 @Composable
-@Preview
 fun App() {
-    // Estado para saber qué pantalla mostrar
-    var showLotes by remember { mutableStateOf(false) }
+    // Inicializar Napier una sola vez fuera del ciclo de recomposición
+    remember {
+        Napier.base(DebugAntilog())
+        true
+    }
 
-    MaterialTheme {
-        if (showLotes) {
-            // Aquí llamarías a LoteValidationScreen()
-            // Podrías pasarle un callback similar para volver
-            LoteValidationScreen()
-        } else {
-            // Pasamos la lógica para cambiar el estado al botón
-            ClientValidationScreen(onNavigateToLotes = { showLotes = true })
+    androidx.compose.material.MaterialTheme {
+        Surface {
+            Navigator(
+                screen = RootScreen(),
+                // 🛡️ Esto asegura que Voyager no intente serializar
+                // el stack de navegación de forma persistente.
+                disposeBehavior = NavigatorDisposeBehavior(
+                    disposeNestedNavigators = false,
+                    disposeSteps = true
+                )
+            ) { navigator ->
+                CurrentScreen()
+            }
         }
     }
 }

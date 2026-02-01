@@ -1,10 +1,8 @@
 package com.alius.gmrstockplus.domain.model
 
-
 import kotlinx.serialization.Serializable
 import kotlinx.datetime.Instant
 import com.alius.gmrstockplus.core.utils.FirebaseInstantSerializer
-
 
 
 @Serializable
