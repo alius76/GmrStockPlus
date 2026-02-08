@@ -1,5 +1,6 @@
 package com.alius.gmrstockplus.domain.model
 
+import com.alius.gmrstockplus.core.utils.FirebaseInstantSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.datetime.Instant
 
@@ -13,6 +14,7 @@ data class Comanda(
     val numeroDeComanda: Long = 0,
     val numberLoteComanda: String,
     val descriptionLoteComanda: String,
+    @Serializable(with = FirebaseInstantSerializer::class)
     val dateBookedComanda: Instant? = null,
     val totalWeightComanda: String,
     val bookedClientComanda: Cliente? = null,

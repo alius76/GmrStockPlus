@@ -1,22 +1,27 @@
 package com.alius.gmrstockplus.domain.model
 
+import com.alius.gmrstockplus.core.utils.FirebaseInstantSerializer
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class Trasvase(
+    // El ID ya está en el cuerpo como trasvaseId, así que lo mapeamos directamente
     val trasvaseId: String = "",
-    val trasvaseNumber: String = "",          // Número de lote
-    val trasvaseDescription: String = "",     // Descripción o material
-    val trasvaseLocation: String = "",        // Ejemplo: "Vertisol"
-    val trasvaseCount: String = "",           // Cantidad de BigBags
-    val trasvaseTotalWeight: String = "",     // Peso total
-    val trasvaseDate: Instant? = null,        // 🔹 Fecha del trasvase
+    val trasvaseNumber: String = "",
+    val trasvaseDescription: String = "",
+    val trasvaseLocation: String = "",
+    val trasvaseCount: String = "",
+    val trasvaseTotalWeight: String = "",
+
+    @Serializable(with = FirebaseInstantSerializer::class)
+    val trasvaseDate: Instant? = null,
+
     val trasvaseBigBag: List<TrasvaseBigBag> = emptyList()
 )
 
 @Serializable
 data class TrasvaseBigBag(
-    val bbTrasNumber: String = "",  // Número individual del BigBag
-    val bbTrasWeight: String = ""   // Peso individual
+    val bbTrasNumber: String = "",
+    val bbTrasWeight: String = ""
 )

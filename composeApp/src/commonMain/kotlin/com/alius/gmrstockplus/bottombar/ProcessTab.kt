@@ -34,8 +34,6 @@ class ProcessTab(
 
     @Composable
     override fun Content() {
-        Navigator(
-            screen = ProcessScreenContent(user = user, plantId = plantId)
-        )
+        ProcessScreenContent(user = user, plantId = plantId)
     }
 }

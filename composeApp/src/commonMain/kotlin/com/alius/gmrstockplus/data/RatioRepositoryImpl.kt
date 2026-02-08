@@ -1,18 +1,94 @@
 package com.alius.gmrstockplus.data
 
 import com.alius.gmrstockplus.data.firestore.FirebaseClient
-import com.alius.gmrstockplus.data.mappers.RatioMapper
 import com.alius.gmrstockplus.domain.model.Ratio
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.*
+import dev.gitlive.firebase.firestore.where
+import dev.gitlive.firebase.firestore.Timestamp
+import dev.gitlive.firebase.firestore.DocumentSnapshot
 
 class RatioRepositoryImpl(
     private val plantId: String
 ) : RatioRepository {
 
-    // Obtenemos la instancia de Firestore (P07 o P08) desde nuestro mediador central
     private val db = FirebaseClient.getDb(plantId)
-    private val collection = db.collection("ratios")
+    private val collection = db.collection("ratio")
+    private val TAG = "GMR_REPO"
+
+    /**
+     * Mapper manual para convertir el DocumentSnapshot de Firestore
+     * al modelo de dominio Ratio, manejando la conversión de Timestamp a Long.
+     */
+    private fun mapDocumentToRatio(doc: DocumentSnapshot): Ratio {
+        // Usamos .get() con el tipo explícito para cada campo.
+        // Esto evita que Firebase intente serializar el mapa completo.
+
+        val id = try { doc.get<String>("ratioId") } catch (e: Exception) { "" }
+        val loteId = try { doc.get<String>("ratioLoteId") } catch (e: Exception) { "" }
+        val weight = try { doc.get<String>("ratioTotalWeight") } catch (e: Exception) { "0" }
+
+        // Para la fecha, obtenemos el Timestamp y lo pasamos a Long
+        val dateLong = try {
+            val ts = doc.get<Timestamp>("ratioDate")
+            ts.seconds * 1000
+        } catch (e: Exception) {
+            0L
+        }
+
+        return Ratio(
+            ratioId = id ?: "",
+            ratioLoteId = loteId ?: "",
+            ratioTotalWeight = weight ?: "0",
+            ratioDate = dateLong
+        )
+    }
+
+    override suspend fun listarRatiosPorRango(inicio: LocalDate, fin: LocalDate): List<Ratio> {
+        val inicioTimestamp = Timestamp(inicio.atStartOfDayIn(TimeZone.currentSystemDefault()).epochSeconds, 0)
+        val finTimestamp = Timestamp(fin.plus(1, DateTimeUnit.DAY).atStartOfDayIn(TimeZone.currentSystemDefault()).epochSeconds, 0)
+
+        Napier.d(tag = TAG) { "🔍 [PLANTA $plantId] Buscando entre $inicio y $fin" }
+
+        return try {
+            val snapshot = collection
+                .where {
+                    all(
+                        "ratioDate" greaterThanOrEqualTo inicioTimestamp,
+                        "ratioDate" lessThan finTimestamp
+                    )
+                }
+                .get()
+
+            Napier.d(tag = TAG) { "📦 [PLANTA $plantId] Documentos encontrados: ${snapshot.documents.size}" }
+
+            snapshot.documents.map { doc ->
+                mapDocumentToRatio(doc)
+            }
+        } catch (e: Exception) {
+            Napier.e(tag = TAG, throwable = e) { "❌ Error en Firestore: ${e.message}" }
+            emptyList()
+        }
+    }
+
+    override suspend fun obtenerProgresoMensual(): Float {
+        val objetivoMensual = 1_000_000.0
+        val ratiosDelMes = listarRatiosDelMes()
+
+        val totalKilosMes = ratiosDelMes.sumOf { ratio ->
+            ratio.ratioTotalWeight
+                .replace(",", ".")
+                .filter { it.isDigit() || it == '.' || it == '-' }
+                .toDoubleOrNull() ?: 0.0
+        }
+
+        val porcentaje = (totalKilosMes / objetivoMensual).toFloat()
+        Napier.d(tag = TAG) { "📊 Suma Total: $totalKilosMes / $objetivoMensual -> $porcentaje" }
+
+        return porcentaje.coerceIn(0f, 1f)
+    }
+
+    // --- Métodos de conveniencia delegados a listarRatiosPorRango ---
 
     override suspend fun listarRatiosDelDia(): List<Ratio> {
         val hoy = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -22,7 +98,6 @@ class RatioRepositoryImpl(
     override suspend fun listarRatiosDelMes(): List<Ratio> {
         val ahora = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
         val inicioMes = LocalDate(ahora.year, ahora.month, 1)
-        // Calculamos el último día del mes actual
         val finMes = inicioMes.plus(1, DateTimeUnit.MONTH).minus(1, DateTimeUnit.DAY)
         return listarRatiosPorRango(inicioMes, finMes)
     }
@@ -32,48 +107,6 @@ class RatioRepositoryImpl(
         val inicioAno = LocalDate(ahora.year, 1, 1)
         val finAno = LocalDate(ahora.year, 12, 31)
         return listarRatiosPorRango(inicioAno, finAno)
-    }
-
-    override suspend fun listarRatiosPorRango(inicio: LocalDate, fin: LocalDate): List<Ratio> {
-        Napier.d { "🔥 Firestore SDK: Listando ratios de $plantId desde $inicio hasta $fin" }
-        return try {
-            // ✅ SINTAXIS COMPATIBLE:
-            // Usamos el FilterBuilder de forma explícita para que devuelva un Filter (no Unit)
-            val snapshot = collection
-                .where {
-                    all(
-                        "ratioDate" greaterThanOrEqualTo inicio.toString(),
-                        "ratioDate" lessThanOrEqualTo fin.toString()
-                    )
-                }
-                .get()
-
-            snapshot.documents.map { doc ->
-                RatioMapper.fromFirestore(doc.data())
-            }
-        } catch (e: Exception) {
-            Napier.e(e) { "❌ Error Firestore SDK en $plantId: ${e.message}" }
-            // Imprime el error completo para debuguear si es un error de índices de Firestore
-            e.printStackTrace()
-            emptyList()
-        }
-    }
-
-    suspend fun obtenerProgresoMensual(): Float {
-        val objetivoMensual = 1_500_000.0
-
-        // Obtenemos los ratios usando tu función que ya filtra por mes
-        val ratiosDelMes = listarRatiosDelMes()
-
-        // 🛠️ SUMA CORRECTA: Convertimos el String a Double para sumar
-        val totalKilosMes = ratiosDelMes.sumOf {
-            it.ratioTotalWeight.toDoubleOrNull() ?: 0.0
-        }
-
-        // Calculamos el porcentaje (0.0 a 1.0)
-        val porcentaje = (totalKilosMes / objetivoMensual).toFloat()
-
-        return porcentaje.coerceAtMost(1.0f)
     }
 
     override suspend fun listarRatiosUltimos12Meses(): List<Ratio> {

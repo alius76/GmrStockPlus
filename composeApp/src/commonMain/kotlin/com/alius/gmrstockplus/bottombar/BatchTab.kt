@@ -13,7 +13,7 @@ import com.alius.gmrstockplus.presentation.screens.BatchScreenContent
 
 class BatchTab(
     private val user: User,
-    private val plantId: String // 👈 Cambiamos databaseUrl por plantId (ej. "P07")
+    private val plantId: String
 ) : Tab {
 
     override val key: String = "BatchTab_${user.id}_$plantId"
@@ -33,7 +33,7 @@ class BatchTab(
 
     @Composable
     override fun Content() {
-        // Pasamos el plantId al contenido de la pantalla
+
         BatchScreenContent(user = user, plantId = plantId)
     }
 }

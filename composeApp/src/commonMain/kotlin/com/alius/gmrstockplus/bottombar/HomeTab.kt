@@ -3,6 +3,7 @@ package com.alius.gmrstockplus.bottombar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key // Importante
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import cafe.adriel.voyager.navigator.Navigator
@@ -13,7 +14,7 @@ import com.alius.gmrstockplus.presentation.screens.HomeScreenContent
 
 class HomeTab(
     private val user: User,
-    private val plantId: String, // 🔑 Recibimos el identificador de planta
+    private val plantId: String,
     private val onChangeDatabase: () -> Unit,
     private val onLogoutClick: () -> Unit = {}
 ) : Tab {
@@ -33,14 +34,18 @@ class HomeTab(
 
     @Composable
     override fun Content() {
-        // Envolvemos el contenido en un Navigator propio de la pestaña
-        Navigator(
-            screen = HomeScreenContent(
-                user = user,
-                plantId = plantId, // 🔑 Pasamos el plantId al contenido
-                onChangeDatabase = onChangeDatabase,
-                onLogoutClick = onLogoutClick
+        // 🔑 LA SOLUCIÓN:
+        // Si plantId cambia, 'key' destruye este Navigator y crea uno nuevo.
+        // Sin esto, Voyager siempre mostrará la HomeScreenContent que se creó la primera vez.
+        key(plantId) {
+            Navigator(
+                screen = HomeScreenContent(
+                    user = user,
+                    plantId = plantId,
+                    onChangeDatabase = onChangeDatabase,
+                    onLogoutClick = onLogoutClick
+                )
             )
-        )
+        }
     }
 }

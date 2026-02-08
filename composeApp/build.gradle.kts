@@ -123,7 +123,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.alius.gmrstock"
+    namespace = "com.alius.gmrstockplus"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {

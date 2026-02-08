@@ -4,14 +4,14 @@ import com.alius.gmrstockplus.domain.model.Ratio
 import kotlinx.datetime.LocalDate
 
 interface RatioRepository {
-    suspend fun listarRatiosDelMes(): List<Ratio>
     suspend fun listarRatiosDelDia(): List<Ratio>
+    suspend fun listarRatiosDelMes(): List<Ratio>
     suspend fun listarRatiosDelAno(): List<Ratio>
     suspend fun listarRatiosPorRango(inicio: LocalDate, fin: LocalDate): List<Ratio>
     suspend fun listarRatiosUltimos12Meses(): List<Ratio>
+    suspend fun obtenerProgresoMensual(): Float
 }
 
-// Función para obtener la implementación inyectando el ID de la planta
+// ✅ Asegúrate de que el nombre sea 'plantId' para que coincida con la implementación
 expect fun getRatioRepository(plantId: String): RatioRepository
-
 
