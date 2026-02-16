@@ -264,8 +264,8 @@ actual object PdfGenerator {
     }
 
     // ============================================================
-    // 2. GENERAR PLANNING COMANDAS (DISEÑO GRID + LOGO - DESKTOP)
-    // ============================================================
+// 2. GENERAR PLANNING COMANDAS (ACTUALIZADO MULTI-MATERIAL - DESKTOP)
+// ============================================================
     actual fun generatePlanningPdf(
         comandas: List<Comanda>,
         title: String,
@@ -282,7 +282,7 @@ actual object PdfGenerator {
         var contentStream = PDPageContentStream(document, currentPage)
 
         val columnWidth = (pageWidth - (margin * 2) - 10f) / 2f
-        val cellHeight = 115f
+        val cellHeight = 140f // Aumentado para multi-material
         val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
 
         fun checkNewPage(needed: Float) {
@@ -321,13 +321,13 @@ actual object PdfGenerator {
         contentStream.setFont(PDType1Font.HELVETICA, 11f)
         contentStream.setNonStrokingColor(Color.GRAY)
         contentStream.newLineAtOffset(margin, y)
-        contentStream.showText("Rango: ${ensureYearInRange(dateRange).pdfSafe()}")
+        contentStream.showText("Rango: ${dateRange.pdfSafe()}")
         contentStream.endText()
 
         y -= 45f
 
         groupedComandas.forEach { (date, list) ->
-            checkNewPage(155f)
+            checkNewPage(160f)
             val dateText = if (date == null) "SIN FECHA" else "${date.dayOfMonth.toString().padStart(2, '0')}/${date.monthNumber.toString().padStart(2, '0')}/${date.year}"
 
             contentStream.beginText()
@@ -344,103 +344,100 @@ actual object PdfGenerator {
                 val xOffset = if (isRightColumn) margin + columnWidth + 10f else margin
                 if (!isRightColumn && index > 0) checkNewPage(cellHeight + 10f)
 
+                // Dibujar Celda
                 contentStream.setStrokingColor(Color.LIGHT_GRAY)
                 contentStream.setLineWidth(0.5f)
                 contentStream.addRect(xOffset, y - cellHeight, columnWidth, cellHeight)
                 contentStream.stroke()
 
                 var innerY = y - 20f
-                val clienteNombre = (comanda.bookedClientComanda?.cliNombre ?: "Sin Cliente").pdfSafe()
-                val truncatedNombre = if (clienteNombre.length > 25) clienteNombre.take(22) + "..." else clienteNombre
+
+                // Cliente
                 contentStream.beginText()
-                contentStream.setFont(PDType1Font.HELVETICA_BOLD, 11f)
+                contentStream.setFont(PDType1Font.HELVETICA_BOLD, 10.5f)
                 contentStream.setNonStrokingColor(DarkGrayPdfColor)
                 contentStream.newLineAtOffset(xOffset + 10f, innerY)
-                contentStream.showText(truncatedNombre)
+                contentStream.showText((comanda.bookedClientComanda?.cliNombre ?: "Sin Cliente").take(22).pdfSafe())
                 contentStream.endText()
 
+                // Badge RETRASO
                 if (date != null && date < today) {
                     val labelWidth = 55f
                     val labelHeight = 14f
-                    val labelX = xOffset + columnWidth - labelWidth - 8f
-                    val labelY = innerY - 2f
-
-                    // 1. Dibujar el rectángulo de fondo
                     contentStream.setNonStrokingColor(ReservedPdfColor)
-                    contentStream.addRect(labelX, labelY, labelWidth, labelHeight)
+                    contentStream.addRect(xOffset + columnWidth - labelWidth - 8f, innerY - 2f, labelWidth, labelHeight)
                     contentStream.fill()
 
-                    // 2. Configurar el texto
                     contentStream.beginText()
-                    val fontSize = 7f
-                    val font = PDType1Font.HELVETICA_BOLD
-                    contentStream.setFont(font, fontSize)
+                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 7f)
                     contentStream.setNonStrokingColor(Color.WHITE)
-
-                    val labelTxt = "RETRASO"
-
-                    // --- CÁLCULO DE CENTRADO ---
-                    // Ancho real del texto
-                    val textWidth = font.getStringWidth(labelTxt) / 1000f * fontSize
-
-                    // El "Cap Height" o altura de las mayúsculas para centrar verticalmente
-                    // Usamos aproximadamente 0.7 del fontSize como altura visual de la fuente
-                    val textHeight = font.fontDescriptor.capHeight / 1000f * fontSize
-
-                    // Posición X: Inicio del rectángulo + (Mitad del rect - Mitad del texto)
-                    val centerX = labelX + (labelWidth - textWidth) / 2f
-
-                    // Posición Y: Inicio del rectángulo + (Mitad del rect - Mitad de la altura del texto)
-                    // Nota: El texto se dibuja desde la línea base (baseline)
-                    val centerY = labelY + (labelHeight - textHeight) / 2f
-
-                    contentStream.newLineAtOffset(centerX, centerY)
-                    contentStream.showText(labelTxt)
+                    contentStream.newLineAtOffset(xOffset + columnWidth - labelWidth + 3f, innerY + 2f)
+                    contentStream.showText("RETRASO")
                     contentStream.endText()
                 }
 
-                innerY -= 18f
-                contentStream.beginText()
-                contentStream.setFont(PDType1Font.HELVETICA, 10f)
-                contentStream.setNonStrokingColor(TextPrimaryPdf)
-                contentStream.newLineAtOffset(xOffset + 10f, innerY)
-                contentStream.showText("Material: ${comanda.descriptionLoteComanda.take(28).pdfSafe()}")
-                contentStream.endText()
-
+                // --- LISTADO DINÁMICO DE MATERIALES ---
                 innerY -= 15f
-                contentStream.beginText()
-                contentStream.newLineAtOffset(xOffset + 10f, innerY)
-                // USO DE formatWeight EN COMANDAS
-                contentStream.showText("Peso: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg")
-                contentStream.endText()
+                comanda.listaAsignaciones.take(3).forEach { asig ->
+                    val tieneLote = asig.numeroLote.isNotBlank()
 
-                innerY -= 18f
-                val isAssigned = comanda.numberLoteComanda.isNotBlank()
+                    // Nombre Material
+                    contentStream.beginText()
+                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 9f)
+                    contentStream.setNonStrokingColor(if (tieneLote) PrimaryPdfColor else WarningPdfColor)
+                    contentStream.newLineAtOffset(xOffset + 10f, innerY)
+                    contentStream.showText("- ${asig.materialNombre.take(25).pdfSafe()}")
+                    contentStream.endText()
+
+                    innerY -= 11f
+
+                    // Info Lote
+                    contentStream.beginText()
+                    contentStream.setFont(PDType1Font.HELVETICA, 8.5f)
+                    contentStream.setNonStrokingColor(Color.DARK_GRAY)
+                    contentStream.newLineAtOffset(xOffset + 18f, innerY)
+                    val infoLote = if (tieneLote) "Lote: ${asig.numeroLote} (${asig.cantidadBB} BB)" else "PENDIENTE ASIGNAR"
+                    contentStream.showText(infoLote.pdfSafe())
+                    contentStream.endText()
+
+                    innerY -= 13f
+                }
+
+                if (comanda.listaAsignaciones.size > 3) {
+                    contentStream.beginText()
+                    contentStream.setFont(PDType1Font.HELVETICA, 7.5f)
+                    contentStream.setNonStrokingColor(Color.GRAY)
+                    contentStream.newLineAtOffset(xOffset + 18f, innerY)
+                    contentStream.showText("+${comanda.listaAsignaciones.size - 3} adicionales...")
+                    contentStream.endText()
+                }
+
+                // --- INFO FIJA INFERIOR (Peso y Obs) ---
+                val footerY = y - cellHeight + 25f
                 contentStream.beginText()
-                contentStream.setFont(PDType1Font.HELVETICA_BOLD, 11f)
-                contentStream.setNonStrokingColor(if (isAssigned) PrimaryPdfColor else WarningPdfColor)
-                contentStream.newLineAtOffset(xOffset + 10f, innerY)
-                contentStream.showText(if (isAssigned) "Lote: ${comanda.numberLoteComanda}" else "PENDIENTE DE ASIGNAR")
+                contentStream.setFont(PDType1Font.HELVETICA_BOLD, 9f)
+                contentStream.setNonStrokingColor(Color.BLACK)
+                contentStream.newLineAtOffset(xOffset + 10f, footerY)
+                contentStream.showText("Peso Total: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg")
                 contentStream.endText()
 
                 if (!comanda.remarkComanda.isNullOrBlank()) {
-                    innerY -= 14f
                     contentStream.beginText()
-                    contentStream.setFont(PDType1Font.HELVETICA_OBLIQUE, 8f)
+                    contentStream.setFont(PDType1Font.HELVETICA_OBLIQUE, 7.5f)
                     contentStream.setNonStrokingColor(Color.GRAY)
-                    contentStream.newLineAtOffset(xOffset + 10f, innerY)
-                    val obs = if (comanda.remarkComanda!!.length > 65) comanda.remarkComanda!!.take(62) + "..." else comanda.remarkComanda!!
-                    contentStream.showText("Obs: ${obs.pdfSafe()}")
+                    contentStream.newLineAtOffset(xOffset + 10f, footerY - 12f)
+                    val obs = comanda.remarkComanda!!.take(45).pdfSafe()
+                    contentStream.showText("Obs: $obs")
                     contentStream.endText()
                 }
+
                 if (isRightColumn || index == list.size - 1) y -= (cellHeight + 10f)
             }
             y -= 20f
         }
 
         contentStream.close()
-
-        val fileName = "Planning_Comandas_${System.currentTimeMillis()}"
+        val fileName = "Planning_GmrStock_${System.currentTimeMillis()}"
         savePdfDesktop(document, fileName)
     }
 

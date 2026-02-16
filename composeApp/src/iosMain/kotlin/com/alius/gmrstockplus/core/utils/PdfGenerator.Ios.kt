@@ -185,14 +185,14 @@ actual object PdfGenerator {
     }
 
     // ============================================================
-    // 2. GENERAR PLANNING COMANDAS (iOS)
-    // ============================================================
+// 2. GENERAR PLANNING COMANDAS (ACTUALIZADO MULTI-MATERIAL - iOS)
+// ============================================================
     actual fun generatePlanningPdf(
         comandas: List<Comanda>,
         title: String,
         dateRange: String
     ) {
-        val fileName = "Planning_Comandas_${Clock.System.now().toEpochMilliseconds()}.pdf"
+        val fileName = "Planning_GmrStock_${Clock.System.now().toEpochMilliseconds()}.pdf"
         val paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, true)
         val cacheDirectory = paths.first() as String
         val filePath = cacheDirectory + "/" + fileName
@@ -202,7 +202,7 @@ actual object PdfGenerator {
         val pageRect = CGRectMake(0.0, 0.0, pageWidth, pageHeight)
         val margin = 40.0
         val columnWidth = (pageWidth - (margin * 2.0) - 10.0) / 2.0
-        val cellHeight = 115.0
+        val cellHeight = 140.0 // Aumentado para la lista de materiales
 
         UIGraphicsBeginPDFContextToFile(filePath, pageRect, null)
         UIGraphicsBeginPDFPageWithInfo(pageRect, null)
@@ -233,11 +233,11 @@ actual object PdfGenerator {
         drawText(logoText, pageWidth - margin - logoWidth, currentY, UIFont.boldSystemFontOfSize(22.0), primaryColor)
 
         currentY += 22.0
-        drawText("Rango: ${ensureYearInRange(dateRange)}", margin, currentY, UIFont.systemFontOfSize(11.0), UIColor.grayColor)
+        drawText("Rango: $dateRange", margin, currentY, UIFont.systemFontOfSize(11.0), UIColor.grayColor)
         currentY += 45.0
 
         groupedComandas.forEach { (date, list) ->
-            checkNewPage(155.0)
+            checkNewPage(160.0)
 
             val dateText = if (date == null) "SIN FECHA" else "${date.dayOfMonth.toString().padStart(2, '0')}/${date.monthNumber.toString().padStart(2, '0')}/${date.year}"
             drawText(dateText, margin, currentY, UIFont.boldSystemFontOfSize(15.0), UIColor.blackColor)
@@ -248,35 +248,52 @@ actual object PdfGenerator {
                 val xOffset = if (isRightColumn) margin + columnWidth + 10.0 else margin
                 if (!isRightColumn && index > 0) checkNewPage(cellHeight + 10.0)
 
+                // Dibujo de la Celda
                 val rect = CGRectMake(xOffset, currentY, columnWidth, cellHeight)
                 UIColor.lightGrayColor.setStroke()
                 UIBezierPath.bezierPathWithRoundedRect(rect, 8.0).apply { setLineWidth(0.5); stroke() }
 
                 var innerY = currentY + 10.0
-                val clienteNombre = comanda.bookedClientComanda?.cliNombre ?: "Sin Cliente"
-                val truncatedNombre = if (clienteNombre.length > 25) clienteNombre.take(22) + "..." else clienteNombre
-                drawText(truncatedNombre, xOffset + 10.0, innerY, UIFont.boldSystemFontOfSize(11.0), darkGrayColor)
 
+                // Cliente
+                val clienteNombre = (comanda.bookedClientComanda?.cliNombre ?: "Sin Cliente").take(22)
+                drawText(clienteNombre, xOffset + 10.0, innerY, UIFont.boldSystemFontOfSize(10.5), darkGrayColor)
+
+                // Badge RETRASO
                 if (date != null && date < today) {
-                    val labelRect = CGRectMake(xOffset + columnWidth - 65.0, currentY + 8.0, 57.0, 14.0)
+                    val labelRect = CGRectMake(xOffset + columnWidth - 60.0, currentY + 8.0, 52.0, 14.0)
                     reservedColor.setFill()
                     UIBezierPath.bezierPathWithRoundedRect(labelRect, 4.0).fill()
                     drawTextInRect("RETRASO", labelRect, UIFont.boldSystemFontOfSize(7.0), UIColor.whiteColor, NSTextAlignmentCenter)
                 }
 
-                innerY += 18.0
-                drawText("Material: ${comanda.descriptionLoteComanda.take(28)}", xOffset + 10.0, innerY, UIFont.systemFontOfSize(10.0), textPrimaryColor)
+                // --- LISTADO DE MATERIALES (iOS) ---
                 innerY += 15.0
-                drawText("Peso: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg", xOffset + 10.0, innerY, UIFont.systemFontOfSize(10.0), UIColor.grayColor)
-                innerY += 18.0
+                comanda.listaAsignaciones.take(3).forEach { asig ->
+                    val tieneLote = asig.numeroLote.isNotBlank()
+                    val statusColor = if (tieneLote) primaryColor else warningColor
 
-                val isAssigned = comanda.numberLoteComanda.isNotBlank()
-                drawText(if (isAssigned) "Lote: ${comanda.numberLoteComanda}" else "PENDIENTE DE ASIGNAR", xOffset + 10.0, innerY, UIFont.boldSystemFontOfSize(11.0), if (isAssigned) primaryColor else warningColor)
+                    // Material
+                    drawText("• ${asig.materialNombre.take(20)}", xOffset + 10.0, innerY, UIFont.boldSystemFontOfSize(9.0), statusColor)
+                    innerY += 11.0
+
+                    // Lote e Info
+                    val loteText = if (tieneLote) "  Lote: ${asig.numeroLote} (${asig.cantidadBB} BB)" else "  PENDIENTE ASIGNAR"
+                    drawText(loteText, xOffset + 10.0, innerY, UIFont.systemFontOfSize(8.5), UIColor.darkGrayColor)
+                    innerY += 13.0
+                }
+
+                if (comanda.listaAsignaciones.size > 3) {
+                    drawText("  +${comanda.listaAsignaciones.size - 3} materiales adicionales", xOffset + 10.0, innerY, UIFont.systemFontOfSize(8.0), UIColor.grayColor)
+                }
+
+                // --- PIE DE CELDA (PESO TOTAL Y OBS) ---
+                val footerY = currentY + cellHeight - 25.0
+                drawText("Peso Total: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg", xOffset + 10.0, footerY, UIFont.boldSystemFontOfSize(9.0), UIColor.blackColor)
 
                 if (comanda.remarkComanda.isNotBlank()) {
-                    innerY += 14.0
-                    val obs = if (comanda.remarkComanda.length > 30) comanda.remarkComanda.take(27) + "..." else comanda.remarkComanda
-                    drawText("Obs: $obs", xOffset + 10.0, innerY, UIFont.italicSystemFontOfSize(8.0), UIColor.grayColor)
+                    val obs = "Obs: ${comanda.remarkComanda.take(40)}" + if (comanda.remarkComanda.length > 40) "..." else ""
+                    drawText(obs, xOffset + 10.0, footerY + 11.0, UIFont.italicSystemFontOfSize(7.5), UIColor.grayColor)
                 }
 
                 if (isRightColumn || index == list.size - 1) currentY += cellHeight + 10.0

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,15 +29,21 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.alius.gmrstockplus.data.getClientRepository
 import com.alius.gmrstockplus.data.getComandaRepository
 import com.alius.gmrstockplus.data.getMaterialRepository
+import com.alius.gmrstockplus.domain.model.AsignacionLote
 import com.alius.gmrstockplus.domain.model.Cliente
 import com.alius.gmrstockplus.domain.model.Comanda
 import com.alius.gmrstockplus.domain.model.Material
+import com.alius.gmrstockplus.ui.components.AddComandaDialog
 import com.alius.gmrstockplus.ui.components.ClientesSelectedDialogContent
 import com.alius.gmrstockplus.ui.components.ComandaCard
+import com.alius.gmrstockplus.ui.components.ConfirmDeleteComandaDialog
+import com.alius.gmrstockplus.ui.components.ConfirmReassignDateDialog
+import com.alius.gmrstockplus.ui.components.EditRemarkDialog
 import com.alius.gmrstockplus.ui.components.InlineCalendarSelector
 import com.alius.gmrstockplus.ui.components.MaterialSelectedDialogContent
 import com.alius.gmrstockplus.ui.components.UniversalDatePickerDialog
 import com.alius.gmrstockplus.ui.components.PlanningAssignmentBottomSheet
+import com.alius.gmrstockplus.ui.components.SelectMaterialAssignmentDialog
 import com.alius.gmrstockplus.ui.theme.BackgroundColor
 import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import kotlinx.coroutines.launch
@@ -44,7 +51,7 @@ import kotlinx.datetime.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 class ComandaScreen(
-    private val plantId: String, // Cambiado databaseUrl por plantId
+    private val plantId: String,
     private val currentUserEmail: String
 ) : Screen {
 
@@ -54,6 +61,8 @@ class ComandaScreen(
         val scope = rememberCoroutineScope()
         val snackbarHostState = remember { SnackbarHostState() }
 
+        var isProcessing by remember { mutableStateOf(false) }
+
         // --- Repositorios ---
         val clientRepository = remember(plantId) { getClientRepository(plantId) }
         val materialRepository = remember(plantId) { getMaterialRepository(plantId) }
@@ -62,9 +71,7 @@ class ComandaScreen(
         // --- Estados principales ---
         var comandasDelDia by remember { mutableStateOf(listOf<Comanda>()) }
         var fechaSeleccionada by remember {
-            mutableStateOf(
-                Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
-            )
+            mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date)
         }
         var todasLasComandas by remember { mutableStateOf(listOf<Comanda>()) }
 
@@ -74,7 +81,6 @@ class ComandaScreen(
         var showClientesDialog by remember { mutableStateOf(false) }
 
         var materials by remember { mutableStateOf<List<Material>>(emptyList()) }
-        var selectedMaterial by remember { mutableStateOf<Material?>(null) }
         var showMaterialDialog by remember { mutableStateOf(false) }
 
         var showAgregarDialog by remember { mutableStateOf(false) }
@@ -93,8 +99,12 @@ class ComandaScreen(
 
         // --- Estados para ASIGNACIÓN DE LOTE ---
         var showAssignmentSheet by remember { mutableStateOf(false) }
+        var showMaterialSelectionDialog by remember { mutableStateOf(false) }
         var comandaForLote by remember { mutableStateOf<Comanda?>(null) }
         val assignmentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+        // --- ESTADOS PARA MULTI-MATERIAL ---
+        var selectedMaterialsList by remember { mutableStateOf(listOf<Material>()) }
 
         // --- Diálogos y Modificaciones ---
         var showConfirmDeleteDialog by remember { mutableStateOf(false) }
@@ -104,7 +114,6 @@ class ComandaScreen(
         var newRemark by remember { mutableStateOf("") }
         var newDateSelected by remember { mutableStateOf<LocalDate?>(null) }
 
-        // --- Función Maestra de Refresco ---
         fun refrescarDatos() {
             scope.launch {
                 try {
@@ -118,24 +127,25 @@ class ComandaScreen(
             }
         }
 
-        // --- Cargas iniciales ---
-        LaunchedEffect(fechaSeleccionada) {
-            refrescarDatos()
-        }
+        LaunchedEffect(fechaSeleccionada) { refrescarDatos() }
 
         LaunchedEffect(plantId) {
             clients = try {
                 clientRepository.getAllClientsOrderedByName().filter { it.cliNombre != "NO OK" }
-            } catch (e: Exception) { emptyList() }
+            } catch (e: Exception) {
+                emptyList()
+            }
 
             materials = try {
                 materialRepository.getAllMaterialsOrderedByName()
-            } catch (e: Exception) { emptyList() }
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
 
         fun resetFormStates() {
             selectedCliente = null
-            selectedMaterial = null
+            selectedMaterialsList = emptyList()
             totalWeightComanda = ""
             remarkComanda = ""
             errorCliente = false
@@ -143,17 +153,28 @@ class ComandaScreen(
             errorPeso = false
         }
 
-        // --- Lógica CRUD ---
         fun guardarComanda() {
             val instantToSave = fechaSeleccionada.atStartOfDayIn(TimeZone.UTC)
+            val asignacionesIniciales = selectedMaterialsList.map {
+                AsignacionLote(
+                    materialNombre = it.materialNombre,
+                    cantidadBB = 0,
+                    numeroLote = "",
+                    idLote = "",
+                    userAsignacion = ""
+                )
+            }
+
             val nuevaComanda = Comanda(
                 idComanda = "",
                 bookedClientComanda = selectedCliente,
-                descriptionLoteComanda = selectedMaterial?.materialNombre ?: "",
+                descriptionLoteComanda = selectedMaterialsList.firstOrNull()?.materialNombre ?: "",
                 numberLoteComanda = "",
                 dateBookedComanda = instantToSave,
                 totalWeightComanda = totalWeightComanda,
-                remarkComanda = remarkComanda
+                remarkComanda = remarkComanda,
+                userEmailComanda = currentUserEmail,
+                listaAsignaciones = asignacionesIniciales
             )
             scope.launch {
                 val exito = comandaRepository.addComanda(nuevaComanda)
@@ -174,14 +195,42 @@ class ComandaScreen(
         }
 
         fun ejecutarEliminar(comanda: Comanda) {
-            scope.launch {
-                comanda.idComanda.takeIf { it.isNotEmpty() }?.let {
-                    val exito = comandaRepository.deleteComanda(it)
-                    if (exito) refrescarDatos()
+            // 1. Verificación de seguridad:
+            // No permitimos borrar si hay algún lote que ya salió de la planta (fueVendido)
+            val tieneVentasVinculadas = comanda.listaAsignaciones.any { it.fueVendido }
+
+            if (tieneVentasVinculadas) {
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "No se puede anular: existen lotes ya confirmados en báscula.",
+                        duration = SnackbarDuration.Long
+                    )
                 }
-                comandaToModify = null
                 showConfirmDeleteDialog = false
-                selectedComanda = null
+                comandaToModify = null
+                return
+            }
+
+            // 2. Proceso de eliminación si la comanda está "limpia"
+            scope.launch {
+                try {
+                    isProcessing = true
+                    val exito = comandaRepository.deleteComanda(comanda.idComanda)
+                    if (exito) {
+                        snackbarHostState.showSnackbar("Comanda anulada con éxito")
+                        refrescarDatos()
+                    } else {
+                        snackbarHostState.showSnackbar("No se pudo eliminar la comanda")
+                    }
+                } catch (e: Exception) {
+                    println("❌ Error al eliminar: ${e.message}")
+                    snackbarHostState.showSnackbar("Error de conexión al servidor")
+                } finally {
+                    // Garantizamos que la UI se limpie siempre
+                    isProcessing = false
+                    showConfirmDeleteDialog = false
+                    comandaToModify = null
+                }
             }
         }
 
@@ -191,7 +240,8 @@ class ComandaScreen(
             if (comandaToReassign != null && targetDate != null) {
                 scope.launch {
                     val newInstant = targetDate.atStartOfDayIn(TimeZone.UTC)
-                    val exito = comandaRepository.updateComandaDate(comandaToReassign.idComanda, newInstant)
+                    val exito =
+                        comandaRepository.updateComandaDate(comandaToReassign.idComanda, newInstant)
                     if (exito) {
                         fechaSeleccionada = targetDate
                         refrescarDatos()
@@ -203,46 +253,55 @@ class ComandaScreen(
             }
         }
 
-        fun confirmarEliminar(comanda: Comanda) {
-            comandaToModify = comanda
-            showConfirmDeleteDialog = true
-            selectedComanda = null
-        }
-
-        fun confirmarReasignar(comanda: Comanda) {
-            comandaToModify = comanda
-            comandaToUpdateDate = comanda
-            selectedComanda = null
-            showDatePicker = true
-        }
-
-        fun editarObservaciones(comanda: Comanda) {
-            comandaToModify = comanda
-            newRemark = comanda.remarkComanda
-            showEditRemarkDialog = true
-            selectedComanda = null
-        }
-
         // --- UI Principal ---
         Box(modifier = Modifier.fillMaxSize().background(BackgroundColor)) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Header
+                // Header (Exactamente igual a tu original)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(BackgroundColor)
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         IconButton(onClick = { navigator.pop() }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Atrás", tint = PrimaryColor)
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "Atrás",
+                                tint = PrimaryColor
+                            )
                         }
                         Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                            Text("Gestión de comandas", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                            Text("Seleccione fecha", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = Color.Gray, modifier = Modifier.padding(top = 2.dp))
+                            Text(
+                                "Gestión de comandas",
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                "Seleccione fecha",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
-                        IconButton(onClick = { navigator.push(ComandasPlanningScreen(plantId, currentUserEmail)) }) {
-                            Icon(Icons.Default.ListAlt, contentDescription = "Planning", tint = PrimaryColor, modifier = Modifier.size(32.dp))
+                        IconButton(onClick = {
+                            navigator.push(
+                                ComandasPlanningScreen(
+                                    plantId,
+                                    currentUserEmail
+                                )
+                            )
+                        }) {
+                            Icon(
+                                Icons.Default.ListAlt,
+                                contentDescription = "Planning",
+                                tint = PrimaryColor,
+                                modifier = Modifier.size(32.dp)
+                            )
                         }
                     }
 
@@ -257,35 +316,74 @@ class ComandaScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        val conteo = if (comandasDelDia.isNotEmpty()) " (${comandasDelDia.size})" else ""
-                        Text("Comandas$conteo", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = PrimaryColor)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val conteo =
+                            if (comandasDelDia.isNotEmpty()) " (${comandasDelDia.size})" else ""
+                        Text(
+                            "Comandas$conteo",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PrimaryColor
+                        )
                         IconButton(onClick = { resetFormStates(); showAgregarDialog = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Agregar", tint = PrimaryColor, modifier = Modifier.size(32.dp))
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Agregar",
+                                tint = PrimaryColor,
+                                modifier = Modifier.size(32.dp)
+                            )
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Lista de comandas
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp, start = 16.dp, end = 16.dp)
+                    contentPadding = PaddingValues(16.dp)
                 ) {
                     items(comandasDelDia) { comanda ->
                         ComandaCard(
                             comanda = comanda,
                             isSelected = selectedComanda == comanda,
-                            onClick = { selectedComanda = if (selectedComanda == comanda) null else comanda },
-                            onDelete = { confirmarEliminar(comanda) },
-                            onReassign = { confirmarReasignar(comanda) },
-                            onEditRemark = { editarObservaciones(comanda) },
+                            onClick = {
+                                selectedComanda = if (selectedComanda == comanda) null else comanda
+                            },
+                            onDelete = {
+                                comandaToModify = comanda
+                                showConfirmDeleteDialog = true
+                                selectedComanda = null
+                            },
+                            onReassign = {
+                                comandaToModify = comanda
+                                comandaToUpdateDate = comanda
+                                selectedComanda = null
+                                showDatePicker = true
+                            },
+                            onEditRemark = {
+                                comandaToModify = comanda
+                                newRemark = comanda.remarkComanda
+                                showEditRemarkDialog = true
+                                selectedComanda = null
+                            },
                             onAssignLote = {
                                 comandaForLote = comanda
-                                showAssignmentSheet = true
+                                // Si hay varios materiales, preguntamos cuál
+                                val mats =
+                                    comanda.listaAsignaciones.map { it.materialNombre }.distinct()
+                                if (mats.size > 1) {
+                                    showMaterialSelectionDialog = true
+                                } else {
+                                    val mat = mats.firstOrNull() ?: comanda.descriptionLoteComanda
+                                    comandaForLote = comanda.copy(descriptionLoteComanda = mat)
+                                    showAssignmentSheet = true
+                                    scope.launch { assignmentSheetState.show() }
+                                }
                                 selectedComanda = null
-                                scope.launch { assignmentSheetState.show() }
                             }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -293,328 +391,154 @@ class ComandaScreen(
                 }
             }
 
-            // --- Snackbar Host ---
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
 
-            // --- Dialog Agregar Comanda ---
-            if (showAgregarDialog) {
-                Dialog(onDismissRequest = {
-                    showAgregarDialog = false
-                    resetFormStates()
-                }) {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .padding(horizontal = 20.dp, vertical = 16.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                "Agregar comanda",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = PrimaryColor,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-
-                            // Selección Cliente
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .border(
-                                        1.dp,
-                                        if (selectedCliente != null) PrimaryColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { showClientesDialog = true }
-                                    .padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    selectedCliente?.cliNombre ?: "Seleccione cliente",
-                                    color = if (selectedCliente != null) PrimaryColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                            if (errorCliente) Text("Debe seleccionar un cliente válido", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-
-                            // Selección Material
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .border(
-                                        1.dp,
-                                        if (selectedMaterial != null) PrimaryColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { showMaterialDialog = true }
-                                    .padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    selectedMaterial?.materialNombre ?: "Seleccione material",
-                                    color = if (selectedMaterial != null) PrimaryColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                            if (errorDescripcion) Text("Debe seleccionar un material", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-
-                            // Peso total
-                            OutlinedTextField(
-                                value = totalWeightComanda,
-                                onValueChange = { input ->
-                                    totalWeightComanda = input.filter { it.isDigit() };
-                                    errorPeso = false
-                                },
-                                label = { Text("Peso total (Kg)") },
-                                isError = errorPeso,
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = TextFieldDefaults.outlinedTextFieldColors(
-                                    focusedBorderColor = PrimaryColor,
-                                    focusedLabelColor = PrimaryColor,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            )
-                            if (errorPeso) Text("Ingrese un número válido mayor a 0", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-
-                            // Observaciones
-                            OutlinedTextField(
-                                value = remarkComanda,
-                                onValueChange = { remarkComanda = it },
-                                label = { Text("Observaciones") },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 150.dp),
-                                singleLine = false,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = TextFieldDefaults.outlinedTextFieldColors(
-                                    focusedBorderColor = PrimaryColor,
-                                    focusedLabelColor = PrimaryColor,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            )
-
-                            // Botones
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                TextButton(onClick = {
-                                    showAgregarDialog = false
-                                    resetFormStates()
-                                }) { Text("Cancelar", color = PrimaryColor) }
-
-                                TextButton(onClick = {
-                                    var valid = true
-                                    if (selectedCliente == null) { errorCliente = true; valid = false }
-                                    if (selectedMaterial == null) { errorDescripcion = true; valid = false }
-                                    val pesoValido = totalWeightComanda.toIntOrNull()?.takeIf { it > 0 } != null
-                                    if (!pesoValido) { errorPeso = true; valid = false }
-                                    if (!valid) return@TextButton
-
-                                    guardarComanda()
-                                    showAgregarDialog = false
-                                }) { Text("Guardar", color = PrimaryColor) }
-                            }
-                        }
+            // --- Dialog Selección Material para ASIGNAR (Multi-material) ---
+            if (showMaterialSelectionDialog && comandaForLote != null) {
+                SelectMaterialAssignmentDialog(
+                    comanda = comandaForLote!!,
+                    onDismiss = { showMaterialSelectionDialog = false },
+                    onMaterialSelected = { mat ->
+                        comandaForLote = comandaForLote!!.copy(descriptionLoteComanda = mat)
+                        showMaterialSelectionDialog = false
+                        showAssignmentSheet = true
+                        scope.launch { assignmentSheetState.show() }
                     }
-                }
+                )
             }
 
-            // --- Dialog Cliente ---
+            if (showAgregarDialog) {
+                AddComandaDialog(
+                    selectedCliente = selectedCliente,
+                    selectedMaterialsList = selectedMaterialsList,
+                    totalWeight = totalWeightComanda,
+                    remark = remarkComanda,
+                    errorCliente = errorCliente,
+                    errorDescripcion = errorDescripcion,
+                    errorPeso = errorPeso,
+                    onDismiss = { showAgregarDialog = false; resetFormStates() },
+                    onSelectCliente = { showClientesDialog = true },
+                    onAddMaterial = { showMaterialDialog = true },
+                    onRemoveMaterial = { selectedMaterialsList = selectedMaterialsList - it },
+                    onWeightChange = { totalWeightComanda = it.filter { c -> c.isDigit() } },
+                    onRemarkChange = { remarkComanda = it },
+                    onSave = {
+                        val valid =
+                            selectedCliente != null && selectedMaterialsList.isNotEmpty() && totalWeightComanda.isNotEmpty()
+                        if (valid) {
+                            guardarComanda()
+                            showAgregarDialog = false
+                        } else {
+                            errorCliente = selectedCliente == null
+                            errorDescripcion = selectedMaterialsList.isEmpty()
+                            errorPeso = totalWeightComanda.isEmpty()
+                        }
+                    }
+                )
+            }
+
+            // --- Diálogos de Selección ---
             if (showClientesDialog) {
                 ClientesSelectedDialogContent(
                     clients = clients,
                     currentSelectedClient = selectedCliente,
                     showAllOption = false,
-                    onDismiss = {
-                        showClientesDialog = false
-                    },
-                    onConfirm = { clienteSeleccionado ->
-                        selectedCliente = clienteSeleccionado
-                        errorCliente = false
-                        showClientesDialog = false
+                    onDismiss = { showClientesDialog = false },
+                    onConfirm = {
+                        selectedCliente = it; errorCliente = false; showClientesDialog = false
                     }
                 )
             }
 
-            // --- Dialog Material ---
             if (showMaterialDialog) {
                 MaterialSelectedDialogContent(
-                    materials = materials,
-                    currentSelectedMaterial = selectedMaterial,
+                    materials = materials, currentSelectedMaterial = null,
                     onDismiss = { showMaterialDialog = false },
-                    onConfirm = { materialSeleccionado ->
-                        selectedMaterial = materialSeleccionado
+                    onConfirm = {
+                        if (!selectedMaterialsList.contains(it)) selectedMaterialsList =
+                            selectedMaterialsList + it
                         errorDescripcion = false
                         showMaterialDialog = false
                     }
                 )
             }
 
-            // --- DatePicker ---
             if (showDatePicker) {
                 UniversalDatePickerDialog(
-                    initialDate = comandaToUpdateDate?.dateBookedComanda?.toLocalDateTime(TimeZone.currentSystemDefault())?.date ?: fechaSeleccionada,
-                    onDateSelected = { selected ->
+                    initialDate = comandaToUpdateDate?.dateBookedComanda?.toLocalDateTime(TimeZone.currentSystemDefault())?.date
+                        ?: fechaSeleccionada,
+                    onDateSelected = {
                         showDatePicker = false
                         if (comandaToUpdateDate != null) {
-                            newDateSelected = selected
+                            newDateSelected = it
                             comandaToModify = comandaToUpdateDate
                             showConfirmReassignDateDialog = true
                         } else {
-                            fechaSeleccionada = selected
+                            fechaSeleccionada = it
                         }
                         comandaToUpdateDate = null
                     },
-                    onDismiss = {
-                        showDatePicker = false
-                        comandaToUpdateDate = null
-                    },
+                    onDismiss = { showDatePicker = false },
                     primaryColor = PrimaryColor
                 )
             }
 
-            // --- Confirmación Eliminación ---
             if (showConfirmDeleteDialog && comandaToModify != null) {
-                AlertDialog(
-                    onDismissRequest = { showConfirmDeleteDialog = false; comandaToModify = null },
-                    title = { Text("Confirmar anulación") },
-                    text = { Text("¿Está seguro de que desea anular la comanda para ${comandaToModify!!.bookedClientComanda?.cliNombre}?") },
-                    confirmButton = {
-                        TextButton(onClick = { ejecutarEliminar(comandaToModify!!) }) {
-                            Text("Anular", color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showConfirmDeleteDialog = false; comandaToModify = null }) {
-                            Text("Cancelar", color = PrimaryColor)
-                        }
-                    },
-                    shape = RoundedCornerShape(16.dp)
+                ConfirmDeleteComandaDialog(
+                    clienteNombre = comandaToModify!!.bookedClientComanda?.cliNombre ?: "",
+                    isProcessing = isProcessing,
+                    onDismiss = { showConfirmDeleteDialog = false; comandaToModify = null },
+                    onConfirm = { ejecutarEliminar(comandaToModify!!) }
                 )
             }
 
-            // --- Confirmación Reasignación Fecha ---
             if (showConfirmReassignDateDialog && comandaToModify != null && newDateSelected != null) {
-                val oldDate = comandaToModify!!.dateBookedComanda?.toLocalDateTime(TimeZone.currentSystemDefault())?.date ?: fechaSeleccionada
-                val formattedNewDate = "${newDateSelected!!.dayOfMonth.toString().padStart(2, '0')}-${newDateSelected!!.monthNumber.toString().padStart(2, '0')}-${newDateSelected!!.year}"
-                val formattedOldDate = "${oldDate.dayOfMonth.toString().padStart(2, '0')}-${oldDate.monthNumber.toString().padStart(2, '0')}-${oldDate.year}"
-
-                AlertDialog(
-                    onDismissRequest = {
-                        showConfirmReassignDateDialog = false
-                        comandaToModify = null
-                        newDateSelected = null
-                    },
-                    title = { Text("Confirmar nueva fecha") },
-                    text = {
-                        Text("¿Desea mover la comanda de ${comandaToModify!!.bookedClientComanda?.cliNombre} del $formattedOldDate al $formattedNewDate?")
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { ejecutarReasignacionFinal() }) {
-                            Text("Confirmar", color = PrimaryColor)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            showConfirmReassignDateDialog = false
-                            comandaToModify = null
-                            newDateSelected = null
-                        }) {
-                            Text("Cancelar", color = PrimaryColor)
-                        }
-                    },
-                    shape = RoundedCornerShape(16.dp)
+                val oldDate =
+                    comandaToModify!!.dateBookedComanda?.toLocalDateTime(TimeZone.currentSystemDefault())?.date
+                        ?: fechaSeleccionada
+                ConfirmReassignDateDialog(
+                    clienteNombre = comandaToModify!!.bookedClientComanda?.cliNombre ?: "",
+                    oldDate = "${oldDate.dayOfMonth}/${oldDate.monthNumber}",
+                    newDate = "${newDateSelected!!.dayOfMonth}/${newDateSelected!!.monthNumber}",
+                    onDismiss = { showConfirmReassignDateDialog = false; comandaToModify = null },
+                    onConfirm = { ejecutarReasignacionFinal() }
                 )
             }
 
-            // --- Diálogo de EDICIÓN de Observaciones ---
             if (showEditRemarkDialog && comandaToModify != null) {
-                Dialog(onDismissRequest = {
-                    showEditRemarkDialog = false
-                    comandaToModify = null
-                }) {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .padding(horizontal = 20.dp, vertical = 16.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                "Editar observaciones",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = PrimaryColor,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-
-                            OutlinedTextField(
-                                value = newRemark,
-                                onValueChange = { newRemark = it },
-                                label = { Text("Observaciones") },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 150.dp),
-                                singleLine = false,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = TextFieldDefaults.outlinedTextFieldColors(
-                                    focusedBorderColor = PrimaryColor,
-                                    focusedLabelColor = PrimaryColor,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            )
-
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                TextButton(onClick = {
-                                    showEditRemarkDialog = false
-                                    comandaToModify = null
-                                }) { Text("Cancelar", color = PrimaryColor) }
-
-                                TextButton(onClick = {
-                                    actualizarObservaciones(comandaToModify!!, newRemark)
-                                    showEditRemarkDialog = false
-                                    comandaToModify = null
-                                }) { Text("Guardar", color = PrimaryColor) }
-                            }
-                        }
+                EditRemarkDialog(
+                    remark = newRemark,
+                    onRemarkChange = { newRemark = it },
+                    onDismiss = { showEditRemarkDialog = false; comandaToModify = null },
+                    onSave = {
+                        actualizarObservaciones(
+                            comandaToModify!!,
+                            newRemark
+                        ); showEditRemarkDialog = false
                     }
-                }
+                )
             }
 
-            // --- BOTTOM SHEET DE ASIGNACIÓN DE LOTES ---
+            // El BottomSheet se puede quedar igual por su complejidad de estado (sheetState)
             if (showAssignmentSheet && comandaForLote != null) {
                 ModalBottomSheet(
-                    onDismissRequest = {
-                        showAssignmentSheet = false
-                        comandaForLote = null
-                    },
+                    onDismissRequest = { showAssignmentSheet = false; comandaForLote = null },
                     sheetState = assignmentSheetState,
-                    containerColor = Color.White,
-                    dragHandle = { BottomSheetDefaults.DragHandle() }
+                    containerColor = Color.White
                 ) {
                     PlanningAssignmentBottomSheet(
                         selectedComanda = comandaForLote!!,
-                        plantId = plantId, // Cambiado databaseUrl por plantId
+                        plantId = plantId,
                         currentUserEmail = currentUserEmail,
                         clientRepository = clientRepository,
                         onLoteAssignmentSuccess = {
                             refrescarDatos()
                             scope.launch { assignmentSheetState.hide() }.invokeOnCompletion {
-                                if (!assignmentSheetState.isVisible) {
-                                    showAssignmentSheet = false
-                                    comandaForLote = null
-                                }
+                                showAssignmentSheet = false
+                                comandaForLote = null
                             }
                         },
                         snackbarHostState = snackbarHostState

@@ -1,7 +1,6 @@
 package com.alius.gmrstockplus.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -13,12 +12,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.util.lerp
+import com.alius.gmrstockplus.core.utils.formatInstant
 import com.alius.gmrstockplus.data.ClientRepository
 import com.alius.gmrstockplus.data.getCertificadoRepository
 import com.alius.gmrstockplus.data.getComandaRepository
@@ -34,29 +35,29 @@ import kotlin.math.abs
 @Composable
 fun PlanningAssignmentBottomSheet(
     selectedComanda: Comanda,
-    plantId: String, // Único cambio: databaseUrl -> plantId
+    plantId: String,
     currentUserEmail: String,
     clientRepository: ClientRepository,
     onLoteAssignmentSuccess: () -> Unit,
     snackbarHostState: SnackbarHostState
 ) {
     val scope = rememberCoroutineScope()
-    // Repositorios inicializados con plantId
     val loteRepository = remember(plantId) { getLoteRepository(plantId) }
     val comandaRepository = remember(plantId) { getComandaRepository(plantId) }
     val certificadoRepository = remember(plantId) { getCertificadoRepository(plantId) }
 
-    val materialDescription = remember { selectedComanda.descriptionLoteComanda }
-    val comandaClientName = remember { selectedComanda.bookedClientComanda?.cliNombre ?: "Cliente Desconocido" }
+    val materialDescription = remember(selectedComanda) { selectedComanda.descriptionLoteComanda }
+    val comandaClientName = remember(selectedComanda) { selectedComanda.bookedClientComanda?.cliNombre ?: "Cliente Desconocido" }
+    val isComandaVendida = selectedComanda.fueVendidoComanda
     val density = LocalDensity.current
 
     var lotesDisponibles by remember { mutableStateOf<List<LoteModel>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var certificados by remember { mutableStateOf<Map<String, Certificado?>>(emptyMap()) }
+    var occupancyDetails by remember { mutableStateOf<Map<String, List<OccupancyInfo>>>(emptyMap()) }
 
     val pagerBoxHeightDp = 420.dp
 
-    // Función de carga (Mantiene toda tu lógica de filtrado de lotes ocupados)
     val loadLotesForAssignment: () -> Unit = {
         scope.launch {
             isLoading = true
@@ -64,31 +65,47 @@ fun PlanningAssignmentBottomSheet(
                 val loadedLotes = loteRepository.listarLotesPorDescripcion(materialDescription)
                 val todasLasComandas = comandaRepository.listarTodasComandas()
 
-                val lotesOcupadosEnOtrasComandas = todasLasComandas
-                    .filter {
-                        it.idComanda != selectedComanda.idComanda &&
-                                it.numberLoteComanda.isNotBlank() &&
-                                !it.fueVendidoComanda
+                // 1. Calculamos la ocupación real:
+                // Solo cuentan las asignaciones que NO han sido vendidas individualmente
+                occupancyDetails = todasLasComandas
+                    .filter { !it.fueVendidoComanda } // Comandas activas
+                    .flatMap { comanda ->
+                        comanda.listaAsignaciones
+                            .filter { !it.fueVendido && it.numeroLote.isNotBlank() } // SOLO LOTES NO VENDIDOS
+                            .map { asig ->
+                                asig.numeroLote to OccupancyInfo(
+                                    cliente = comanda.bookedClientComanda?.cliNombre ?: "Sin Nombre",
+                                    cantidad = asig.cantidadBB,
+                                    numeroComanda = comanda.numeroDeComanda.toString(),
+                                    fecha = formatInstant(comanda.dateBookedComanda).ifEmpty { "--/--/--" },
+                                    // Trazabilidad: Usamos el usuario que asignó el lote si existe
+                                    usuario = asig.userAsignacion.ifEmpty { comanda.userEmailComanda }.split("@").first()
+                                )
+                            }
                     }
-                    .map { it.numberLoteComanda }
-                    .toSet()
+                    .groupBy({ it.first }, { it.second })
 
-                var filteredLotes = loadedLotes
-                    .filter { lote ->
-                        val isDescriptionMatch = lote.description.equals(materialDescription, ignoreCase = true)
-                        val bookedClient = lote.booked?.cliNombre
-                        val estaOcupadoPorOtraComanda = lotesOcupadosEnOtrasComandas.contains(lote.number)
+                // 2. Filtramos los lotes según su disponibilidad real (Total - Ocupado no vendido)
+                val filteredLotes = loadedLotes.filter { lote ->
+                    val isDescriptionMatch = lote.description.equals(materialDescription, ignoreCase = true)
+                    val bookedClient = lote.booked?.cliNombre
 
-                        if (selectedComanda.numberLoteComanda.isNotBlank()) {
-                            lote.number == selectedComanda.numberLoteComanda
-                        } else {
-                            val isAvailableOrReservedByMe = (lote.booked == null || bookedClient == comandaClientName)
-                            isDescriptionMatch && isAvailableOrReservedByMe && !estaOcupadoPorOtraComanda
-                        }
-                    }
+                    // Sumamos lo ocupado por comandas activas que aún no han pasado por báscula
+                    val totalOcupadoActivo = occupancyDetails[lote.number]?.sumOf { it.cantidad } ?: 0
+                    val totalLote = lote.count.toIntOrNull() ?: 0
+                    val stockDisponible = totalLote - totalOcupadoActivo
 
-                filteredLotes = filteredLotes.sortedBy { it.number }
-                lotesDisponibles = filteredLotes
+                    // Un lote es válido si:
+                    // a) Ya está en esta comanda (para poder desasignarlo o verlo)
+                    // b) Tiene stock y el cliente coincide o no tiene reserva previa
+                    val yaEstaEnEstaComanda = selectedComanda.listaAsignaciones.any { it.numeroLote == lote.number }
+                    val tieneStock = stockDisponible > 0
+                    val esClienteCorrecto = (lote.booked == null || bookedClient == comandaClientName)
+
+                    isDescriptionMatch && esClienteCorrecto && (tieneStock || yaEstaEnEstaComanda)
+                }
+
+                lotesDisponibles = filteredLotes.sortedBy { it.number }
                 certificados = lotesDisponibles.associate { it.number to certificadoRepository.getCertificadoByLoteNumber(it.number) }
 
             } catch (e: Exception) {
@@ -101,61 +118,68 @@ fun PlanningAssignmentBottomSheet(
         }
     }
 
-    // Lógica de asignación/anulación centralizada (Intacta)
-    val assignLoteToComanda: (LoteModel, Boolean) -> Unit = { loteToProcess, shouldClearBooking ->
-        scope.launch {
-            val cliente = selectedComanda.bookedClientComanda
-            val comandaId = selectedComanda.idComanda
-            val loteNumber = loteToProcess.number
-            val isAssignedToThisComanda = loteToProcess.number == selectedComanda.numberLoteComanda
+    val assignLoteToComanda: (LoteModel, Boolean, Int) -> Unit = { loteToProcess, shouldClearBooking, cantidad ->
+        if (isComandaVendida) {
+            scope.launch { snackbarHostState.showSnackbar("No se puede modificar una comanda vendida.") }
+        } else {
+            scope.launch {
+                val comandaId = selectedComanda.idComanda
+                val loteNumber = loteToProcess.number
 
-            if (cliente == null) return@launch
+                // 1. Verificar si el lote ya está asignado (para desasignar)
+                val asignacionExistente = selectedComanda.listaAsignaciones.find { it.numeroLote == loteNumber }
 
-            if (isAssignedToThisComanda) {
-                val comandaSuccess = comandaRepository.updateComandaLoteNumber(comandaId, "")
-                var bookingCleared = true
-                var message = ""
-
-                if (shouldClearBooking) {
-                    bookingCleared = loteRepository.updateLoteBooked(loteToProcess.id, null, null, null, null)
-                    message = if (bookingCleared) "Lote $loteNumber desasignado y reserva anulada."
-                    else "Error al anular reserva."
+                if (asignacionExistente != null) {
+                    val quitSuccess = comandaRepository.quitarAsignacionLote(comandaId, loteNumber)
+                    if (quitSuccess) {
+                        if (shouldClearBooking) loteRepository.updateLoteBooked(loteToProcess.id, null, null, null, null)
+                        loadLotesForAssignment()
+                        onLoteAssignmentSuccess()
+                        snackbarHostState.showSnackbar("Lote $loteNumber desasignado.")
+                    }
                 } else {
-                    message = "Lote $loteNumber desasignado (Reserva mantenida)."
+                    // --- ASIGNACIÓN INTELIGENTE ---
+
+                    // 2. Buscamos si existe un registro PENDIENTE (idLote vacío o numeroLote vacío) para este material
+                    val huecoPendiente = selectedComanda.listaAsignaciones.find {
+                        it.materialNombre.equals(loteToProcess.description, ignoreCase = true) &&
+                                it.numeroLote.isBlank()
+                    }
+
+                    val nuevaAsignacion = AsignacionLote(
+                        idLote = loteToProcess.id,
+                        numeroLote = loteNumber,
+                        cantidadBB = cantidad,
+                        materialNombre = loteToProcess.description,
+                        userAsignacion = currentUserEmail,
+                        fueVendido = false
+                    )
+
+                    val asignacionSuccess = if (huecoPendiente != null) {
+                        // CASO ACTUALIZAR: Existe la línea de material pero no tenía lote
+                        // Aquí usamos una función del repo que sustituya o use el índice/ID de la pendiente
+                        comandaRepository.actualizarAsignacionLote(comandaId, huecoPendiente, nuevaAsignacion)
+                    } else {
+                        // CASO AGREGAR: Es un material nuevo o ya se llenaron los huecos anteriores
+                        comandaRepository.agregarAsignacionLote(comandaId, nuevaAsignacion)
+                    }
+
+                    val comandaSuccess = comandaRepository.updateComandaLoteNumber(comandaId, loteNumber)
+                    val userUpdated = comandaRepository.updateComandaUser(comandaId, currentUserEmail)
+
+                    if (comandaSuccess && userUpdated && asignacionSuccess) {
+                        loadLotesForAssignment()
+                        onLoteAssignmentSuccess()
+                        snackbarHostState.showSnackbar("Lote $loteNumber asignado correctamente.")
+                    } else {
+                        snackbarHostState.showSnackbar("Error al procesar la asignación.")
+                    }
                 }
-
-                if (comandaSuccess && bookingCleared) {
-                    loadLotesForAssignment()
-                    onLoteAssignmentSuccess()
-                    snackbarHostState.showSnackbar(message)
-                } else {
-                    snackbarHostState.showSnackbar("Error al desasignar el lote $loteNumber.")
-                }
-                return@launch
-            }
-
-            if (selectedComanda.numberLoteComanda.isNotBlank()) return@launch
-
-            val loteSuccess = loteRepository.updateLoteBooked(
-                loteToProcess.id,
-                cliente,
-                selectedComanda.dateBookedComanda,
-                currentUserEmail,
-                null
-            )
-            val comandaSuccess = comandaRepository.updateComandaLoteNumber(comandaId, loteNumber)
-
-            if (loteSuccess && comandaSuccess) {
-                loadLotesForAssignment()
-                onLoteAssignmentSuccess()
-                snackbarHostState.showSnackbar("Lote $loteNumber asignado a la comanda con éxito.")
-            } else {
-                snackbarHostState.showSnackbar("Error al asignar lote o comanda.")
             }
         }
     }
 
-    LaunchedEffect(materialDescription, plantId) {
+    LaunchedEffect(materialDescription, plantId, selectedComanda.fueVendidoComanda) {
         loadLotesForAssignment()
     }
 
@@ -169,9 +193,9 @@ fun PlanningAssignmentBottomSheet(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Asignar lote a comanda",
+            text = if (isComandaVendida) "Consulta de Lotes (Vendida)" else "Asignar lote a comanda",
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = PrimaryColor
+            color = if (isComandaVendida) Color.Gray else PrimaryColor
         )
         Text(
             text = "Material: $materialDescription",
@@ -179,7 +203,7 @@ fun PlanningAssignmentBottomSheet(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Cliente: ${selectedComanda.bookedClientComanda?.cliNombre}",
+            text = "Cliente: $comandaClientName",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -218,15 +242,18 @@ fun PlanningAssignmentBottomSheet(
                             lote = lote,
                             comanda = selectedComanda,
                             certificado = certificado,
+                            occupancyList = occupancyDetails[lote.number] ?: emptyList(),
+                            currentUserEmail = currentUserEmail,
                             snackbarHostState = snackbarHostState,
-                            onAssignLote = assignLoteToComanda,
+                            onAssignLote = { loteTarget, clear, cant ->
+                                assignLoteToComanda(loteTarget, clear, cant)
+                            },
                             onViewBigBags = { },
                             modifier = Modifier.fillMaxWidth(0.85f)
                         )
                     }
                 }
 
-                // Barra de progreso vertical (Misma lógica original)
                 val totalItems = lotesDisponibles.size
                 if (totalItems > 1) {
                     val barWidth = 4.dp

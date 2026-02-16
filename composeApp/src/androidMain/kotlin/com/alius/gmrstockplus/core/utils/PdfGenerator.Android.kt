@@ -241,8 +241,8 @@ actual object PdfGenerator {
     }
 
     // ============================================================
-// 2. GENERAR PLANNING COMANDAS (DISEÑO GRID + LOGO + INTELIGENTE)
-// ============================================================
+    // 2. GENERAR PLANNING COMANDAS (ACTUALIZADO: MULTI-MATERIAL)
+    // ============================================================
     actual fun generatePlanningPdf(
         comandas: List<Comanda>,
         title: String,
@@ -260,8 +260,9 @@ actual object PdfGenerator {
         val margin = 40f
         var y = 60f
 
+        // Aumentamos ligeramente la altura de la celda para que quepan varios materiales
         val columnWidth = (pageWidth - (margin * 2) - 10f) / 2f
-        val cellHeight = 115f
+        val cellHeight = 140f
 
         val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
 
@@ -285,11 +286,8 @@ actual object PdfGenerator {
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         paint.textSize = 22f
         paint.color = DarkGrayPdfColor
-
-        // Título a la izquierda
         canvas.drawText(title.uppercase(), margin, y, paint)
 
-        // Logo "GMR Stock" a la derecha (alineado con el título)
         paint.color = PrimaryPdfColor
         val logoText = "GMR Stock"
         val logoWidth = paint.measureText(logoText)
@@ -299,19 +297,17 @@ actual object PdfGenerator {
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         paint.textSize = 11f
         paint.color = Color.GRAY
-        canvas.drawText("Rango: ${ensureYearInRange(dateRange)}", margin, y, paint)
+        canvas.drawText("Rango: $dateRange", margin, y, paint)
 
         y += 45f
 
         groupedComandas.forEach { (date, list) ->
-            // --- VALIDACIÓN DE SALTO DE FECHA INTELIGENTE ---
-            // Título + Espacio + Primera Fila de Celdas
-            checkNewPage(155f)
+            checkNewPage(160f)
 
             val dateText = if (date == null) "SIN FECHA" else "${date.dayOfMonth.toString().padStart(2, '0')}/${date.monthNumber.toString().padStart(2, '0')}/${date.year}"
 
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            paint.textSize = 15f
+            paint.textSize = 14f
             paint.color = Color.BLACK
             canvas.drawText(dateText, margin, y, paint)
 
@@ -321,12 +317,11 @@ actual object PdfGenerator {
                 val isRightColumn = index % 2 != 0
                 val xOffset = if (isRightColumn) margin + columnWidth + 10f else margin
 
-                // Verificación de página para filas siguientes
                 if (!isRightColumn && index > 0) {
                     checkNewPage(cellHeight + 10f)
                 }
 
-                // --- DIBUJO DE CELDA (GRID) ---
+                // Dibujo de Celda
                 paint.style = Paint.Style.STROKE
                 paint.color = Color.LTGRAY
                 paint.strokeWidth = 0.5f
@@ -338,46 +333,61 @@ actual object PdfGenerator {
 
                 // Cliente
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                paint.textSize = 11f
+                paint.textSize = 10.5f
                 paint.color = DarkGrayPdfColor
-                val clienteNombre = comanda.bookedClientComanda?.cliNombre ?: "Sin Cliente"
-                val truncatedNombre = if (clienteNombre.length > 25) clienteNombre.take(22) + "..." else clienteNombre
-                canvas.drawText(truncatedNombre, xOffset + 10f, innerY, paint)
+                canvas.drawText(comanda.bookedClientComanda?.cliNombre?.take(22) ?: "Sin Cliente", xOffset + 10f, innerY, paint)
 
                 // Etiqueta RETRASADA
                 if (date != null && date < today) {
                     val labelPaint = Paint().apply { color = ReservedPdfColor; style = Paint.Style.FILL }
-                    val labelRect = RectF(xOffset + columnWidth - 65f, y + 8f, xOffset + columnWidth - 8f, y + 22f)
+                    val labelRect = RectF(xOffset + columnWidth - 55f, y + 8f, xOffset + columnWidth - 8f, y + 22f)
                     canvas.drawRoundRect(labelRect, 4f, 4f, labelPaint)
-                    paint.color = Color.WHITE; paint.textSize = 7f
+                    paint.color = Color.WHITE; paint.textSize = 7f; paint.typeface = Typeface.DEFAULT_BOLD
                     canvas.drawText("RETRASO", labelRect.centerX() - paint.measureText("RETRASO")/2, labelRect.centerY() + 2.5f, paint)
                 }
 
-                // Detalles (Material, Peso, Lote)
-                innerY += 18f
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                paint.textSize = 10f; paint.color = TextPrimaryPdf
-                canvas.drawText("Material: ${comanda.descriptionLoteComanda.take(28)}", xOffset + 10f, innerY, paint)
-
+                // --- LISTADO DE MATERIALES Y LOTES (DINÁMICO) ---
                 innerY += 15f
-                canvas.drawText("Peso: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg", xOffset + 10f, innerY, paint)
+                paint.textSize = 9f
 
-                innerY += 18f
-                val isAssigned = comanda.numberLoteComanda.isNotBlank()
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                paint.textSize = 11f
-                paint.color = if (isAssigned) PrimaryPdfColor else WarningPdfColor
-                canvas.drawText(if (isAssigned) "Lote: ${comanda.numberLoteComanda}" else "PENDIENTE DE ASIGNAR", xOffset + 10f, innerY, paint)
+                // Iteramos sobre las asignaciones (máximo 3 para que quepa en el PDF)
+                comanda.listaAsignaciones.take(3).forEach { asig ->
+                    paint.typeface = Typeface.DEFAULT_BOLD
+                    paint.color = if (asig.numeroLote.isNotBlank()) PrimaryPdfColor else WarningPdfColor
 
-                // Observaciones
+                    val matText = "• ${asig.materialNombre.take(20)}"
+                    canvas.drawText(matText, xOffset + 10f, innerY, paint)
+
+                    innerY += 11f
+                    paint.typeface = Typeface.DEFAULT
+                    paint.color = Color.DKGRAY
+                    val detailText = if (asig.numeroLote.isNotBlank()) {
+                        "  Lote: ${asig.numeroLote} (${asig.cantidadBB} BB)"
+                    } else {
+                        "  PENDIENTE DE ASIGNAR"
+                    }
+                    canvas.drawText(detailText, xOffset + 10f, innerY, paint)
+                    innerY += 13f
+                }
+
+                if (comanda.listaAsignaciones.size > 3) {
+                    paint.textSize = 8f; paint.color = Color.GRAY
+                    canvas.drawText("  +${comanda.listaAsignaciones.size - 3} materiales adicionales", xOffset + 10f, innerY, paint)
+                    innerY += 10f
+                }
+
+                // Peso Total y Observaciones (Fijo al final de la celda o tras materiales)
+                innerY = y + cellHeight - 25f
+                paint.typeface = Typeface.DEFAULT_BOLD; paint.textSize = 9f; paint.color = Color.BLACK
+                canvas.drawText("Peso Total: ${formatWeight(comanda.totalWeightComanda?.toDoubleOrNull() ?: 0.0)} Kg", xOffset + 10f, innerY, paint)
+
                 if (!comanda.remarkComanda.isNullOrBlank()) {
-                    innerY += 14f; paint.color = Color.GRAY
-                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC); paint.textSize = 8f
-                    val obs = if (comanda.remarkComanda!!.length > 65) comanda.remarkComanda!!.take(62) + "..." else comanda.remarkComanda!!
+                    innerY += 12f
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC); paint.textSize = 7.5f; paint.color = Color.GRAY
+                    val obs = comanda.remarkComanda!!.take(45) + if (comanda.remarkComanda!!.length > 45) "..." else ""
                     canvas.drawText("Obs: $obs", xOffset + 10f, innerY, paint)
                 }
 
-                // Control de avance de línea Y
                 if (isRightColumn || index == list.size - 1) {
                     y += cellHeight + 10f
                 }
@@ -386,9 +396,8 @@ actual object PdfGenerator {
         }
 
         pdfDocument.finishPage(page)
-        saveAndSharePdf(pdfDocument, "Planning_Comandas_${Clock.System.now().toEpochMilliseconds()}")
+        saveAndSharePdf(pdfDocument, "Planning_GmrStock_${Clock.System.now().toEpochMilliseconds()}")
     }
-
 
     // ============================================================
 // 3. GENERAR LISTADO DE VENTAS (DISEÑO GRID + LOGO + INTELIGENTE)

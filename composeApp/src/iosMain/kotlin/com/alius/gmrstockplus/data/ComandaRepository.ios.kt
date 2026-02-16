@@ -1,6 +1,8 @@
 package com.alius.gmrstockplus.data
 
-actual fun getComandaRepository(databaseUrl: String): ComandaRepository {
-    return ComandaRepositoryImpl(databaseUrl)
+
+actual fun getComandaRepository(plantName: String): ComandaRepository {
+    return ComandaRepositoryImpl(plantName)
 }
+
 
