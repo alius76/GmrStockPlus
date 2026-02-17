@@ -10,6 +10,7 @@ import cafe.adriel.voyager.navigator.tab.Tab
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import com.alius.gmrstockplus.domain.model.User
 import com.alius.gmrstockplus.presentation.screens.ClientScreenContent
+import com.alius.gmrstockplus.presentation.screens.ProcessScreenContent
 
 class ClientTab(
     private val user: User,
@@ -33,9 +34,6 @@ class ClientTab(
 
     @Composable
     override fun Content() {
-        // Envolvemos para permitir navegación interna en la pestaña de Ranking
-        Navigator(
-            screen = ClientScreenContent(user = user, plantId = plantId)
-        )
+        ClientScreenContent(user = user, plantId = plantId)
     }
 }
