@@ -17,6 +17,22 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
     private val collection by lazy { firestore.collection("comanda") }
     private val metadataCollection by lazy { firestore.collection("metadata") }
 
+    // --- FUNCIONES DE CONVERSIÓN MANUAL (CRUCIAL PARA EVITAR CRASHES EN iOS) ---
+
+    private fun AsignacionLote.toMap(): Map<String, Any?> = mapOf(
+        "idLote" to idLote,
+        "numeroLote" to numeroLote,
+        "materialNombre" to materialNombre,
+        "cantidadBB" to cantidadBB,
+        "userAsignacion" to userAsignacion,
+        "fueVendido" to fueVendido
+    )
+
+    private fun Cliente.toMap(): Map<String, Any?> = mapOf(
+        "cliNombre" to cliNombre,
+        "cliObservaciones" to cliObservaciones
+    )
+
     // --- MAPEO SEGURO ---
     private fun DocumentSnapshot.toComandaSafe(): Comanda? {
         return try {
@@ -49,6 +65,34 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
     }
 
     // --- QUERIES ---
+
+    override suspend fun getOccupancyByLote(loteNumber: String): List<OccupancyInfo> = withContext(Dispatchers.IO) {
+        if (loteNumber.isBlank()) return@withContext emptyList()
+        try {
+            val snapshot = collection
+                .where { "fueVendidoComanda" equalTo false }
+                .get()
+
+            snapshot.documents
+                .mapNotNull { it.toComandaSafe() }
+                .flatMap { comanda ->
+                    comanda.listaAsignaciones
+                        .filter { it.numeroLote == loteNumber && !it.fueVendido && it.cantidadBB > 0 }
+                        .map { asig ->
+                            OccupancyInfo(
+                                cliente = comanda.bookedClientComanda?.cliNombre ?: "Sin Nombre",
+                                cantidad = asig.cantidadBB,
+                                numeroComanda = comanda.numeroDeComanda.toString(),
+                                fecha = comanda.dateBookedComanda?.let { com.alius.gmrstockplus.core.utils.formatInstant(it) } ?: "--/--/--",
+                                usuario = asig.userAsignacion.ifEmpty { comanda.userEmailComanda }.split("@").first()
+                            )
+                        }
+                }
+        } catch (e: Exception) {
+            println("❌ Error en getOccupancyByLote: ${e.message}")
+            emptyList()
+        }
+    }
 
     override suspend fun listarComandas(filter: String): List<Comanda> = withContext(Dispatchers.IO) {
         try {
@@ -125,7 +169,7 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
         } catch (e: Exception) { emptyList() }
     }
 
-    // --- ESCRITURA ---
+    // --- ESCRITURA (USANDO CONVERSIÓN MANUAL) ---
 
     override suspend fun addComanda(comanda: Comanda): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -138,10 +182,10 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
                 "numeroDeComanda" to nuevoNumero,
                 "userEmailComanda" to comanda.userEmailComanda,
                 "dateBookedComanda" to dateTs,
-                "bookedClientComanda" to comanda.bookedClientComanda,
+                "bookedClientComanda" to comanda.bookedClientComanda?.toMap(),
                 "remarkComanda" to comanda.remarkComanda,
                 "fueVendidoComanda" to comanda.fueVendidoComanda,
-                "listaAsignaciones" to comanda.listaAsignaciones,
+                "listaAsignaciones" to comanda.listaAsignaciones.map { it.toMap() },
                 "numberLoteComanda" to (firstAsignacion?.numeroLote ?: comanda.numberLoteComanda),
                 "descriptionLoteComanda" to (firstAsignacion?.materialNombre ?: comanda.descriptionLoteComanda),
                 "totalWeightComanda" to comanda.totalWeightComanda
@@ -154,18 +198,14 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
 
     override suspend fun agregarAsignacionLote(comandaId: String, asignacion: AsignacionLote): Boolean = withContext(Dispatchers.IO) {
         try {
-            // Usamos arrayUnion para añadir la nueva asignación (incluyendo userAsignacion)
+            // Arreglo para iOS: pasar asignacion como Map
             collection.document(comandaId).update(
-                "listaAsignaciones" to FieldValue.arrayUnion(asignacion)
+                "listaAsignaciones" to FieldValue.arrayUnion(asignacion.toMap())
             )
             true
         } catch (e: Exception) { false }
     }
 
-    /**
-     * Sustitución Inteligente: Reemplaza un registro pendiente por uno con lote real.
-     * Mantiene la trazabilidad del usuario que realiza la acción.
-     */
     override suspend fun actualizarAsignacionLote(
         comandaId: String,
         antigua: AsignacionLote,
@@ -179,7 +219,6 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
                 val comanda = snapshot.data<Comanda>()
                 val listaActual = comanda.listaAsignaciones.toMutableList()
 
-                // Buscamos el registro "Pendiente" (mismo material, sin lote)
                 val indice = listaActual.indexOfFirst {
                     it.materialNombre == antigua.materialNombre && it.numeroLote.isBlank()
                 }
@@ -190,10 +229,9 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
                     listaActual.add(nueva)
                 }
 
-                // Actualizamos el documento con la lista nueva y el usuario de la acción
                 update(docRef,
-                    "listaAsignaciones" to listaActual,
-                    "userEmailComanda" to nueva.userAsignacion, // Registramos quién hizo el último cambio
+                    "listaAsignaciones" to listaActual.map { it.toMap() }, // Convertir lista completa
+                    "userEmailComanda" to nueva.userAsignacion,
                     "numberLoteComanda" to nueva.numeroLote,
                     "descriptionLoteComanda" to nueva.materialNombre
                 )
@@ -214,12 +252,9 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
                 val comanda = snapshot.data<Comanda>()
                 val listaActual = comanda.listaAsignaciones.toMutableList()
 
-                // Buscamos el índice de la asignación que tiene ese número de lote
                 val indice = listaActual.indexOfFirst { it.numeroLote == loteNumber }
 
                 if (indice != -1) {
-                    // En lugar de borrar la línea, la "limpiamos"
-                    // Conservamos el materialNombre para que la comanda sepa qué le falta
                     val asignacionLimpia = listaActual[indice].copy(
                         idLote = "",
                         numeroLote = "",
@@ -229,10 +264,9 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
                     )
                     listaActual[indice] = asignacionLimpia
 
-                    // Actualizamos la lista y limpiamos el campo de cabecera 'numberLoteComanda'
                     update(docRef,
-                        "listaAsignaciones" to listaActual,
-                        "numberLoteComanda" to "" // Opcional: limpiar el lote principal de la cabecera
+                        "listaAsignaciones" to listaActual.map { it.toMap() }, // Convertir lista completa
+                        "numberLoteComanda" to ""
                     )
                 }
             }
@@ -262,7 +296,7 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
         try {
             val dateTs = dateBooked?.let { Timestamp(it.epochSeconds, it.nanosecondsOfSecond) }
             collection.document(comandaId).update(
-                "bookedClientComanda" to cliente,
+                "bookedClientComanda" to cliente?.toMap(), // Usar toMap()
                 "dateBookedComanda" to dateTs,
                 "remarkComanda" to (bookedRemark ?: "")
             )

@@ -1,6 +1,5 @@
 package com.alius.gmrstockplus.ui.components
 
-
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -25,10 +24,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import com.alius.gmrstockplus.data.ClientRepository
 import com.alius.gmrstockplus.data.LoteRepository
+import com.alius.gmrstockplus.data.getComandaRepository
 import com.alius.gmrstockplus.domain.model.BigBags
 import com.alius.gmrstockplus.domain.model.Certificado
 import com.alius.gmrstockplus.domain.model.CertificadoStatus
 import com.alius.gmrstockplus.domain.model.LoteModel
+import com.alius.gmrstockplus.domain.model.OccupancyInfo
 import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -49,34 +50,43 @@ fun LotesBottomSheetContent(
 ) {
     var searchText by remember { mutableStateOf("") }
     var lotes by remember { mutableStateOf<List<LoteModel>>(emptyList()) }
+    var occupancyMap by remember { mutableStateOf<Map<String, List<OccupancyInfo>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val comandaRepository = remember { getComandaRepository(databaseUrl) }
 
-    // BUSCADOR con debounce y filtro contains
+    // BUSCADOR con debounce, filtro y carga de ocupación
     LaunchedEffect(searchText) {
         isLoading = true
         kotlinx.coroutines.delay(300)
 
         if (searchText.isBlank()) {
             lotes = emptyList()
+            occupancyMap = emptyMap()
             isLoading = false
-            println("Lotes: Filtro vacío. Lista vaciada.")
             return@LaunchedEffect
         }
 
-
-        val allLotes = withContext(Dispatchers.IO) {
+        val filteredLotes = withContext(Dispatchers.IO) {
             try {
-                loteRepository.listarLotes("")
+                val all = loteRepository.listarLotes("")
+                all.filter { it.number.contains(searchText, ignoreCase = true) }
             } catch (e: Exception) {
                 emptyList()
             }
         }
 
+        // Cargamos la ocupación de los lotes encontrados para la LoteCard
+        val map = withContext(Dispatchers.IO) {
+            filteredLotes.associate { lote ->
+                lote.number to comandaRepository.getOccupancyByLote(lote.number)
+            }
+        }
 
-        lotes = allLotes.filter { it.number.contains(searchText, ignoreCase = true) }
-
+        lotes = filteredLotes
+        occupancyMap = map
         isLoading = false
     }
 
@@ -86,8 +96,7 @@ fun LotesBottomSheetContent(
             .padding(horizontal = 16.dp, vertical = 10.dp)
             .navigationBarsPadding()
     ) {
-
-        // 🔍 CAJA DE BÚSQUEDA (solo números)
+        // 🔍 CAJA DE BÚSQUEDA
         OutlinedTextField(
             value = searchText,
             onValueChange = { newValue ->
@@ -98,18 +107,13 @@ fun LotesBottomSheetContent(
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Buscar") },
             shape = RoundedCornerShape(12.dp),
-
-
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Text,
+                keyboardType = KeyboardType.Number,
                 imeAction = ImeAction.Done
             ),
             keyboardActions = KeyboardActions(
-                onDone = {
-                    keyboardController?.hide() // Cierra el teclado
-                }
+                onDone = { keyboardController?.hide() }
             ),
-
             modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .align(Alignment.CenterHorizontally),
@@ -124,19 +128,13 @@ fun LotesBottomSheetContent(
 
         when {
             isLoading -> {
-                Box(
-                    Modifier.fillMaxWidth().height(420.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.fillMaxWidth().height(420.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = PrimaryColor)
                 }
             }
 
             lotes.isEmpty() && searchText.isBlank() -> {
-                Box(
-                    Modifier.fillMaxWidth().height(420.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.fillMaxWidth().height(420.dp), contentAlignment = Alignment.Center) {
                     Text(
                         text = "🔎 Ingrese el número de lote para buscar.",
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -145,10 +143,7 @@ fun LotesBottomSheetContent(
             }
 
             lotes.isEmpty() && searchText.isNotBlank() -> {
-                Box(
-                    Modifier.fillMaxWidth().height(420.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.fillMaxWidth().height(420.dp), contentAlignment = Alignment.Center) {
                     Text(
                         text = "No se encontraron lotes para \"$searchText\"",
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -159,19 +154,16 @@ fun LotesBottomSheetContent(
             else -> {
                 val pagerState = rememberPagerState(initialPage = 0) { lotes.size }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(420.dp)
-                ) {
-
-                    // PAGER
+                Box(modifier = Modifier.fillMaxWidth().height(420.dp)) {
                     VerticalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 60.dp)
                     ) { index ->
                         val lote = lotes[index]
+                        val occupancy = occupancyMap[lote.number] ?: emptyList()
+
+                        // Certificado (puedes cargar certificados aquí igual que la ocupación si lo necesitas)
                         val cert: Certificado? = null
                         val certColor = when (cert?.status) {
                             CertificadoStatus.ADVERTENCIA -> MaterialTheme.colorScheme.error
@@ -180,18 +172,9 @@ fun LotesBottomSheetContent(
                         }
 
                         val pageOffset = pagerState.currentPage - index + pagerState.currentPageOffsetFraction
-                        val scale by animateFloatAsState(
-                            targetValue = lerp(0.85f, 1f, 1f - abs(pageOffset)),
-                            animationSpec = tween(300)
-                        )
-                        val alpha by animateFloatAsState(
-                            targetValue = lerp(0.55f, 1f, 1f - abs(pageOffset)),
-                            animationSpec = tween(300)
-                        )
-                        val translation by animateFloatAsState(
-                            targetValue = pageOffset * 40f,
-                            animationSpec = tween(300)
-                        )
+                        val scale by animateFloatAsState(targetValue = lerp(0.85f, 1f, 1f - abs(pageOffset)))
+                        val alpha by animateFloatAsState(targetValue = lerp(0.55f, 1f, 1f - abs(pageOffset)))
+                        val translation by animateFloatAsState(targetValue = pageOffset * 40f)
 
                         Box(
                             modifier = Modifier
@@ -208,6 +191,7 @@ fun LotesBottomSheetContent(
                                 lote = lote,
                                 certificado = cert,
                                 certificadoIconColor = certColor,
+                                occupancyList = occupancy, // 👈 SOLUCIONADO: Se pasa el parámetro requerido
                                 modifier = Modifier.fillMaxWidth(0.85f),
                                 scope = scope,
                                 snackbarHostState = snackbarHostState,
@@ -232,7 +216,6 @@ fun LotesBottomSheetContent(
                             .align(Alignment.CenterEnd)
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                     ) {
-
                         if (lotes.size > 1) {
                             val progress = (pagerState.currentPage + pagerState.currentPageOffsetFraction) / (lotes.size - 1).toFloat()
                             Box(
@@ -241,12 +224,9 @@ fun LotesBottomSheetContent(
                                     .fillMaxHeight(progress.coerceIn(0f, 1f))
                                     .background(PrimaryColor, shape = CircleShape)
                             )
-                        } else {
-
                         }
                     }
                 }
-
                 Spacer(modifier = Modifier.height(18.dp))
             }
         }

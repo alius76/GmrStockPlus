@@ -4,9 +4,15 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.AssignmentInd
+import androidx.compose.material.icons.filled.DatasetLinked
+import androidx.compose.material.icons.filled.FactCheck
+import androidx.compose.material.icons.filled.Inventory
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -80,7 +86,6 @@ fun PlanningLoteCard(
     val disponibles = (totalBB - totalAsignado).coerceAtLeast(0)
 
     // --- Lógica Central de Estado por Línea ---
-    // Buscamos si este lote específico está en la lista de asignaciones de la comanda
     val asignacionEnComanda = remember(comanda.listaAsignaciones, lote.number) {
         comanda.listaAsignaciones.find { it.numeroLote == lote.number }
     }
@@ -104,7 +109,7 @@ fun PlanningLoteCard(
         border = BorderStroke(
             width = 2.dp,
             color = when {
-                isLoteYaVendidoEnComanda -> Color(0xFF4CAF50).copy(alpha = 0.8f) // Verde si ya se vendió
+                isLoteYaVendidoEnComanda -> Color(0xFF4CAF50).copy(alpha = 0.8f)
                 isAssignedToThisComanda -> PrimaryColor.copy(alpha = 0.8f)
                 isReservedByOther -> ReservedColor.copy(alpha = 0.6f)
                 else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
@@ -132,7 +137,7 @@ fun PlanningLoteCard(
                 Row(horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = { showOccupancyDialog = true }, modifier = Modifier.size(32.dp)) {
                         Icon(
-                            Icons.Default.Group,
+                            Icons.Default.DatasetLinked,
                             contentDescription = "Ocupación",
                             tint = if (occupancyList.isNotEmpty()) PrimaryColor else Color.Gray
                         )
@@ -150,15 +155,35 @@ fun PlanningLoteCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- 2. DETALLES BÁSICOS Y STOCK ---
+            // --- 2. DETALLES BÁSICOS Y STOCK (MODIFICADO) ---
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailRow("Ubicación", lote.location)
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                // Primera línea: Stock disponible y relación de BigBags con icono
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("Stock Disponible", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                    Text("$disponibles / $totalBB BB", fontWeight = FontWeight.Bold, color = if(disponibles > 0) PrimaryColor else Color.Red)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "$disponibles / $totalBB",
+                            fontWeight = FontWeight.Bold,
+                            color = if(disponibles > 0) PrimaryColor else Color.Red
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.Inventory,
+                            contentDescription = null,
+                            tint = if(disponibles > 0) PrimaryColor else Color.Red,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
 
+                // Segunda línea: Ubicación
+                DetailRow("Ubicación", lote.location)
+
+                // Tercera línea: Peso
                 DetailRow("Peso total", "${formatWeight(totalWeightNumber)} Kg", PrimaryColor)
             }
 
@@ -205,7 +230,6 @@ fun PlanningLoteCard(
                     },
                     contentColor = if (isComandaVendida || isLoteYaVendidoEnComanda) Color.DarkGray else Color.White
                 ),
-                // Bloqueo total si la comanda general está vendida O si este lote específico ya se entregó
                 enabled = !isComandaVendida && !isLoteYaVendidoEnComanda && (isAssignedToThisComanda || (!isReservedByOther && disponibles > 0))
             ) {
                 Text(

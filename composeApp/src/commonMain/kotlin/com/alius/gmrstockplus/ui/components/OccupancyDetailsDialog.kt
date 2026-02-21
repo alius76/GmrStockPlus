@@ -103,17 +103,25 @@ private fun OccupancyCardItem(info: OccupancyInfo) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // BADGE CORREGIDO
                 Surface(
                     color = PrimaryColor,
                     shape = RoundedCornerShape(4.dp)
                 ) {
-                    Text(
-                        text = "#${info.numeroComanda.padStart(6, '0')}",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp, vertical = 4.dp), // Padding para la burbuja
+                        contentAlignment = Alignment.Center // Centrado total
+                    ) {
+                        Text(
+                            text = "#${info.numeroComanda.padStart(6, '0')}",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center, // Asegura centrado horizontal del texto
+                            lineHeight = 10.sp // Fuerza a que la altura de línea coincida con el tamaño
+                        )
+                    }
                 }
 
                 Text(
@@ -132,15 +140,15 @@ private fun OccupancyCardItem(info: OccupancyInfo) {
             HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- CUERPO: CANTIDAD (donde antes iba Nº Comanda) Y FECHA ---
+            // --- CUERPO: CANTIDAD Y FECHA ---
             Row(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("CANTIDAD", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Text("BIG BAGS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                         Icon(Icons.Default.Inventory2, null, Modifier.size(14.dp), PrimaryColor)
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "${info.cantidad} BB",
+                            text = "${info.cantidad}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = PrimaryColor

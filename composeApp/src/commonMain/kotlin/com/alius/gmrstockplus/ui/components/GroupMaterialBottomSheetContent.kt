@@ -20,10 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import com.alius.gmrstockplus.data.ClientRepository
 import com.alius.gmrstockplus.data.getCertificadoRepository
 import com.alius.gmrstockplus.data.getLoteRepository
-import com.alius.gmrstockplus.domain.model.BigBags
-import com.alius.gmrstockplus.domain.model.Certificado
-import com.alius.gmrstockplus.domain.model.CertificadoStatus
-import com.alius.gmrstockplus.domain.model.LoteModel
+import com.alius.gmrstockplus.data.getComandaRepository
+import com.alius.gmrstockplus.domain.model.*
 import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -45,10 +43,12 @@ fun GroupMaterialBottomSheetContent(
     val scope = rememberCoroutineScope()
     val loteRepository = remember { getLoteRepository(databaseUrl) }
     val certificadoRepository = remember { getCertificadoRepository(databaseUrl) }
+    val comandaRepository = remember { getComandaRepository(databaseUrl) }
     val density = LocalDensity.current
 
     var lotes by remember { mutableStateOf<List<LoteModel>>(emptyList()) }
     var certificados by remember { mutableStateOf<Map<String, Certificado?>>(emptyMap()) }
+    var occupancyMap by remember { mutableStateOf<Map<String, List<OccupancyInfo>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
 
     // Carga inicial
@@ -57,7 +57,17 @@ fun GroupMaterialBottomSheetContent(
         try {
             val loadedLotes = loteNumbers.mapNotNull { loteRepository.getLoteByNumber(it) }
             lotes = loadedLotes
-            certificados = loadedLotes.associate { it.number to certificadoRepository.getCertificadoByLoteNumber(it.number) }
+
+            // Cargar certificados
+            certificados = loadedLotes.associate {
+                it.number to certificadoRepository.getCertificadoByLoteNumber(it.number)
+            }
+
+            // Cargar ocupaciones para el stock dinámico
+            occupancyMap = loadedLotes.associate { lote ->
+                lote.number to comandaRepository.getOccupancyByLote(lote.number)
+            }
+
         } catch (e: Exception) {
             scope.launch { snackbarHostState.showSnackbar("Error cargando lotes: ${e.message}") }
         } finally {
@@ -113,6 +123,8 @@ fun GroupMaterialBottomSheetContent(
             ) { index ->
                 val lote = lotes[index]
                 val cert = certificados[lote.number]
+                val occupancy = occupancyMap[lote.number] ?: emptyList()
+
                 val certColor = when (cert?.status) {
                     CertificadoStatus.ADVERTENCIA -> MaterialTheme.colorScheme.error
                     CertificadoStatus.CORRECTO -> PrimaryColor
@@ -123,17 +135,20 @@ fun GroupMaterialBottomSheetContent(
 
                 val scale by animateFloatAsState(
                     targetValue = lerp(0.85f, 1f, 1f - abs(pageOffset)),
-                    animationSpec = tween(300)
+                    animationSpec = tween(300),
+                    label = "scale"
                 )
 
                 val alpha by animateFloatAsState(
                     targetValue = lerp(0.55f, 1f, 1f - abs(pageOffset)),
-                    animationSpec = tween(300)
+                    animationSpec = tween(300),
+                    label = "alpha"
                 )
 
                 val translation by animateFloatAsState(
                     targetValue = pageOffset * 40f,
-                    animationSpec = tween(300)
+                    animationSpec = tween(300),
+                    label = "translation"
                 )
 
                 Box(
@@ -151,6 +166,7 @@ fun GroupMaterialBottomSheetContent(
                         lote = lote,
                         certificado = cert,
                         certificadoIconColor = certColor,
+                        occupancyList = occupancy,
                         modifier = Modifier.fillMaxWidth(0.85f),
                         scope = scope,
                         snackbarHostState = snackbarHostState,
@@ -179,7 +195,8 @@ fun GroupMaterialBottomSheetContent(
 
                 val thumbOffsetPx by animateFloatAsState(
                     targetValue = normalizedPosition * travelRangePx,
-                    animationSpec = tween(300)
+                    animationSpec = tween(300),
+                    label = "thumbOffset"
                 )
 
                 Box(

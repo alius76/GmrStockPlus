@@ -43,6 +43,7 @@ fun LoteCard(
     lote: LoteModel,
     certificado: Certificado?,
     certificadoIconColor: Color,
+    occupancyList: List<OccupancyInfo>, // 👈 Agregado para calcular stock disponible
     modifier: Modifier = Modifier,
     scope: CoroutineScope,
     snackbarHostState: SnackbarHostState,
@@ -57,8 +58,14 @@ fun LoteCard(
     var showReservedDialog by remember { mutableStateOf(false) }
     var showRemarkDialog by remember { mutableStateOf(false) }
     var showAddRemarkDialog by remember { mutableStateOf(false) }
+    var showOccupancyDialog by remember { mutableStateOf(false) } // 👈 Nuevo estado
 
     val totalWeightNumber = lote.totalWeight.toDoubleOrNull() ?: 0.0
+
+    // --- CÁLCULOS DE STOCK DINÁMICO ---
+    val totalBB = lote.count.toIntOrNull() ?: 0
+    val totalAsignado = occupancyList.sumOf { it.cantidad }
+    val disponibles = (totalBB - totalAsignado).coerceAtLeast(0)
 
     var currentRemarkText by remember { mutableStateOf(lote.remark) }
     var currentBookedRemark by remember { mutableStateOf(lote.bookedRemark ?: "") }
@@ -80,7 +87,7 @@ fun LoteCard(
                 .animateContentSize()
         ) {
 
-            // 1. CABECERA REESTRUCTURADA
+            // 1. CABECERA REESTRUCTURADA (Ahora con 5 botones)
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -134,6 +141,19 @@ fun LoteCard(
                         )
                     }
 
+                    // Asignaciones (NUEVO)
+                    IconButton(
+                        onClick = { showOccupancyDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DatasetLinked,
+                            contentDescription = "Ver asignaciones",
+                            tint = if (occupancyList.isNotEmpty()) PrimaryColor else Color.Gray,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
                     // Certificado
                     IconButton(
                         onClick = { showCertificadoDialog = true },
@@ -163,7 +183,7 @@ fun LoteCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
             // 2. BLOQUE DE DETALLES
@@ -172,7 +192,30 @@ fun LoteCard(
                     DetailRow("Material", lote.description)
                     DetailRow("Fecha", formatInstant(lote.date))
                     DetailRow("Ubicación", lote.location)
-                    DetailRow("BigBags", lote.count.toString())
+
+                    // Fila de Stock con icono Inventory (NUEVA LÓGICA)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Stock Disponible", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "$disponibles / $totalBB",
+                                fontWeight = FontWeight.Bold,
+                                color = if(disponibles > 0) PrimaryColor else Color.Red
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Inventory,
+                                contentDescription = null,
+                                tint = if(disponibles > 0) PrimaryColor else Color.Red,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
                     DetailRow("Peso total", "${formatWeight(totalWeightNumber)} Kg", PrimaryColor)
                 }
 
@@ -233,6 +276,7 @@ fun LoteCard(
             }
         }
     }
+
 
     // --- Diálogo Observación General ---
     if (showRemarkDialog) {
@@ -345,6 +389,15 @@ fun LoteCard(
             dismissButton = {
                 TextButton(onClick = { showAddRemarkDialog = false }) { Text("Cancelar", color = PrimaryColor) }
             }
+        )
+    }
+
+    // 1. Añade el diálogo de Ocupación reutilizando tu componente
+    if (showOccupancyDialog) {
+        OccupancyDetailsDialog(
+            loteNumber = lote.number,
+            occupancyList = occupancyList,
+            onDismiss = { showOccupancyDialog = false }
         )
     }
 
@@ -729,6 +782,15 @@ fun LoteCard(
                     selectedCliente = cliente
                     showClientesDialog = false
                 }
+            )
+        }
+
+        // --- NUEVO: Diálogo de Asignaciones (Occupancy) ---
+        if (showOccupancyDialog) {
+            OccupancyDetailsDialog(
+                loteNumber = lote.number,
+                occupancyList = occupancyList,
+                onDismiss = { showOccupancyDialog = false }
             )
         }
     }

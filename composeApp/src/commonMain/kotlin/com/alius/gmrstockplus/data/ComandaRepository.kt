@@ -1,8 +1,6 @@
 package com.alius.gmrstockplus.data
 
-import com.alius.gmrstockplus.domain.model.AsignacionLote
-import com.alius.gmrstockplus.domain.model.Comanda
-import com.alius.gmrstockplus.domain.model.Cliente
+import com.alius.gmrstockplus.domain.model.*
 import kotlinx.datetime.Instant
 
 interface ComandaRepository {
@@ -35,6 +33,12 @@ interface ComandaRepository {
      * Consulta de Comandas Pendientes (no vendidas) para un Cliente específico.
      */
     suspend fun getPendingComandasByClient(clientName: String): List<Comanda>
+
+    /**
+     * Obtiene el desglose de ocupación para un lote específico.
+     * Crucial para calcular el stock disponible real (Total - Ocupado).
+     */
+    suspend fun getOccupancyByLote(loteNumber: String): List<OccupancyInfo>
 
 
     // --- Operaciones de Escritura (CRUD) ---
