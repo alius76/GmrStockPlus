@@ -173,7 +173,23 @@ fun GroupMaterialBottomSheetContent(
                         onViewBigBags = onViewBigBags,
                         databaseUrl = databaseUrl,
                         onRemarkUpdated = { updatedLote ->
+                            // 1. Actualizamos la lista de lotes para reflejar cambios en 'booked', 'remark', etc.
                             lotes = lotes.map { if (it.id == updatedLote.id) updatedLote else it }
+
+                            // 2. ¡CRUCIAL!: Refrescamos la ocupación de este lote específico
+                            scope.launch {
+                                try {
+                                    val updatedOccupancy = comandaRepository.getOccupancyByLote(updatedLote.number)
+                                    // Actualizamos el mapa para que el stock dinámico se recalcule
+                                    occupancyMap = occupancyMap.toMutableMap().apply {
+                                        put(updatedLote.number, updatedOccupancy)
+                                    }
+                                } catch (e: Exception) {
+                                    println("Error refrescando ocupación: ${e.message}")
+                                }
+                            }
+
+                            // 3. Notificamos al exterior si es necesario
                             onRemarkUpdated(updatedLote)
                         },
                         clientRepository = clientRepository,

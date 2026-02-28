@@ -29,6 +29,7 @@ import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -65,39 +66,29 @@ fun PlanningAssignmentBottomSheet(
                 val loadedLotes = loteRepository.listarLotesPorDescripcion(materialDescription)
                 val todasLasComandas = comandaRepository.listarTodasComandas()
 
-                // 1. Calculamos la ocupación real:
-                // Solo cuentan las asignaciones que NO han sido vendidas individualmente
                 occupancyDetails = todasLasComandas
-                    .filter { !it.fueVendidoComanda } // Comandas activas
+                    .filter { !it.fueVendidoComanda }
                     .flatMap { comanda ->
                         comanda.listaAsignaciones
-                            .filter { !it.fueVendido && it.numeroLote.isNotBlank() } // SOLO LOTES NO VENDIDOS
+                            .filter { !it.fueVendido && it.numeroLote.isNotBlank() }
                             .map { asig ->
                                 asig.numeroLote to OccupancyInfo(
                                     cliente = comanda.bookedClientComanda?.cliNombre ?: "Sin Nombre",
                                     cantidad = asig.cantidadBB,
                                     numeroComanda = comanda.numeroDeComanda.toString(),
                                     fecha = formatInstant(comanda.dateBookedComanda).ifEmpty { "--/--/--" },
-                                    // Trazabilidad: Usamos el usuario que asignó el lote si existe
                                     usuario = asig.userAsignacion.ifEmpty { comanda.userEmailComanda }.split("@").first()
                                 )
                             }
                     }
                     .groupBy({ it.first }, { it.second })
 
-                // 2. Filtramos los lotes según su disponibilidad real (Total - Ocupado no vendido)
                 val filteredLotes = loadedLotes.filter { lote ->
                     val isDescriptionMatch = lote.description.equals(materialDescription, ignoreCase = true)
                     val bookedClient = lote.booked?.cliNombre
-
-                    // Sumamos lo ocupado por comandas activas que aún no han pasado por báscula
                     val totalOcupadoActivo = occupancyDetails[lote.number]?.sumOf { it.cantidad } ?: 0
                     val totalLote = lote.count.toIntOrNull() ?: 0
                     val stockDisponible = totalLote - totalOcupadoActivo
-
-                    // Un lote es válido si:
-                    // a) Ya está en esta comanda (para poder desasignarlo o verlo)
-                    // b) Tiene stock y el cliente coincide o no tiene reserva previa
                     val yaEstaEnEstaComanda = selectedComanda.listaAsignaciones.any { it.numeroLote == lote.number }
                     val tieneStock = stockDisponible > 0
                     val esClienteCorrecto = (lote.booked == null || bookedClient == comandaClientName)
@@ -118,33 +109,34 @@ fun PlanningAssignmentBottomSheet(
         }
     }
 
-    val assignLoteToComanda: (LoteModel, Boolean, Int) -> Unit = { loteToProcess, shouldClearBooking, cantidad ->
+    val executeAssignLote: (LoteModel, Boolean, Int) -> Unit = { loteToProcess, shouldClearBooking, cantidad ->
         if (isComandaVendida) {
             scope.launch { snackbarHostState.showSnackbar("No se puede modificar una comanda vendida.") }
         } else {
             scope.launch {
                 val comandaId = selectedComanda.idComanda
                 val loteNumber = loteToProcess.number
-
-                // 1. Verificar si el lote ya está asignado (para desasignar)
                 val asignacionExistente = selectedComanda.listaAsignaciones.find { it.numeroLote == loteNumber }
 
                 if (asignacionExistente != null) {
                     val quitSuccess = comandaRepository.quitarAsignacionLote(comandaId, loteNumber)
                     if (quitSuccess) {
-                        if (shouldClearBooking) loteRepository.updateLoteBooked(loteToProcess.id, null, null, null, null)
+                        if (shouldClearBooking) {
+                            loteRepository.updateLoteBooked(loteToProcess.id, null, null, null, null)
+                        }
                         loadLotesForAssignment()
                         onLoteAssignmentSuccess()
-                        snackbarHostState.showSnackbar("Lote $loteNumber desasignado.")
+                        snackbarHostState.showSnackbar(
+                            if (shouldClearBooking) "Lote $loteNumber libre (Reserva anulada)."
+                            else "Lote $loteNumber desasignado de comanda."
+                        )
                     }
                 } else {
-                    // --- ASIGNACIÓN INTELIGENTE ---
-
-                    // 2. Buscamos si existe un registro PENDIENTE (idLote vacío o numeroLote vacío) para este material
-                    val huecoPendiente = selectedComanda.listaAsignaciones.find {
-                        it.materialNombre.equals(loteToProcess.description, ignoreCase = true) &&
-                                it.numeroLote.isBlank()
-                    }
+                    val totalLote = loteToProcess.count.toIntOrNull() ?: 0
+                    val ocupantesOtrosClientes = occupancyDetails[loteNumber]?.filter {
+                        it.numeroComanda != selectedComanda.numeroDeComanda.toString()
+                    } ?: emptyList()
+                    val esAsignacionTotalYExclusiva = (cantidad == totalLote) && ocupantesOtrosClientes.isEmpty()
 
                     val nuevaAsignacion = AsignacionLote(
                         idLote = loteToProcess.id,
@@ -155,24 +147,32 @@ fun PlanningAssignmentBottomSheet(
                         fueVendido = false
                     )
 
+                    val huecoPendiente = selectedComanda.listaAsignaciones.find {
+                        it.materialNombre.equals(loteToProcess.description, ignoreCase = true) &&
+                                it.numeroLote.isBlank()
+                    }
+
                     val asignacionSuccess = if (huecoPendiente != null) {
-                        // CASO ACTUALIZAR: Existe la línea de material pero no tenía lote
-                        // Aquí usamos una función del repo que sustituya o use el índice/ID de la pendiente
                         comandaRepository.actualizarAsignacionLote(comandaId, huecoPendiente, nuevaAsignacion)
                     } else {
-                        // CASO AGREGAR: Es un material nuevo o ya se llenaron los huecos anteriores
                         comandaRepository.agregarAsignacionLote(comandaId, nuevaAsignacion)
                     }
 
-                    val comandaSuccess = comandaRepository.updateComandaLoteNumber(comandaId, loteNumber)
-                    val userUpdated = comandaRepository.updateComandaUser(comandaId, currentUserEmail)
-
-                    if (comandaSuccess && userUpdated && asignacionSuccess) {
+                    if (asignacionSuccess) {
+                        if (esAsignacionTotalYExclusiva) {
+                            loteRepository.updateLoteBooked(
+                                loteId = loteToProcess.id,
+                                cliente = selectedComanda.bookedClientComanda,
+                                dateBooked = Clock.System.now(),
+                                bookedByUser = currentUserEmail,
+                                bookedRemark = "Reserva automática: Lote completo asignado a Comanda #${selectedComanda.numeroDeComanda}"
+                            )
+                        }
+                        comandaRepository.updateComandaLoteNumber(comandaId, loteNumber)
+                        comandaRepository.updateComandaUser(comandaId, currentUserEmail)
                         loadLotesForAssignment()
                         onLoteAssignmentSuccess()
                         snackbarHostState.showSnackbar("Lote $loteNumber asignado correctamente.")
-                    } else {
-                        snackbarHostState.showSnackbar("Error al procesar la asignación.")
                     }
                 }
             }
@@ -186,10 +186,7 @@ fun PlanningAssignmentBottomSheet(
     val pagerState = rememberPagerState(initialPage = 0) { lotesDisponibles.size }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-            .navigationBarsPadding(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -197,23 +194,12 @@ fun PlanningAssignmentBottomSheet(
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
             color = if (isComandaVendida) Color.Gray else PrimaryColor
         )
-        Text(
-            text = "Material: $materialDescription",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Cliente: $comandaClientName",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(text = "Material: $materialDescription", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = "Cliente: $comandaClientName", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Box(
-            modifier = Modifier.fillMaxWidth().height(pagerBoxHeightDp),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxWidth().height(pagerBoxHeightDp), contentAlignment = Alignment.Center) {
             if (isLoading) {
                 CircularProgressIndicator(color = PrimaryColor)
             } else if (lotesDisponibles.isEmpty()) {
@@ -227,7 +213,6 @@ fun PlanningAssignmentBottomSheet(
                     val lote = lotesDisponibles[index]
                     val certificado = certificados[lote.number]
                     val pageOffset = (pagerState.currentPage - index + pagerState.currentPageOffsetFraction)
-
                     val scale by animateFloatAsState(targetValue = lerp(0.85f, 1f, 1f - abs(pageOffset)))
                     val alpha by animateFloatAsState(targetValue = lerp(0.55f, 1f, 1f - abs(pageOffset)))
                     val translation by animateFloatAsState(targetValue = pageOffset * 40f)
@@ -245,8 +230,10 @@ fun PlanningAssignmentBottomSheet(
                             occupancyList = occupancyDetails[lote.number] ?: emptyList(),
                             currentUserEmail = currentUserEmail,
                             snackbarHostState = snackbarHostState,
-                            onAssignLote = { loteTarget, clear, cant ->
-                                assignLoteToComanda(loteTarget, clear, cant)
+                            onAssignLote = { loteTarget, shouldClearBooking, cant ->
+                                // ALIVIADO: Quitamos el if/else que abría el diálogo duplicado.
+                                // La Card ya se encargó de preguntar al usuario si desea anular.
+                                executeAssignLote(loteTarget, shouldClearBooking, cant)
                             },
                             onViewBigBags = { },
                             modifier = Modifier.fillMaxWidth(0.85f)
@@ -263,15 +250,8 @@ fun PlanningAssignmentBottomSheet(
                     val travelRangePx = with(density) { (pagerBoxHeightDp - thumbHeight).toPx() }
                     val thumbOffsetPx by animateFloatAsState(targetValue = normalizedPosition * travelRangePx)
 
-                    Box(
-                        modifier = Modifier.fillMaxHeight().width(barWidth).align(Alignment.CenterEnd)
-                            .padding(vertical = 10.dp).clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    ) {
-                        Box(
-                            modifier = Modifier.offset(y = with(density) { thumbOffsetPx.toDp() })
-                                .width(barWidth).height(thumbHeight).clip(CircleShape).background(PrimaryColor)
-                        )
+                    Box(modifier = Modifier.fillMaxHeight().width(barWidth).align(Alignment.CenterEnd).padding(vertical = 10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))) {
+                        Box(modifier = Modifier.offset(y = with(density) { thumbOffsetPx.toDp() }).width(barWidth).height(thumbHeight).clip(CircleShape).background(PrimaryColor))
                     }
                 }
             }

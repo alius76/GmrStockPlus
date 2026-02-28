@@ -158,17 +158,32 @@ class LoteRepositoryImpl(private val plantName: String) : LoteRepository {
         bookedRemark: String?
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            // Aseguramos que la fecha de reserva se guarde como Timestamp de Firebase
+            // 1. Convertimos la fecha a Timestamp nativo
             val bookedTs = dateBooked?.let { Timestamp(it.epochSeconds, it.nanosecondsOfSecond) }
 
+            // 2. Mapeo Manual del Cliente (Basado en tu modelo actual)
+            // Esto evita que iOS intente serializar la clase Cliente directamente
+            val clienteMap = cliente?.let {
+                mapOf(
+                    "cliNombre" to it.cliNombre,
+                    "cliObservaciones" to it.cliObservaciones
+                )
+            }
+
+            // 3. Actualización en Firestore
             loteCollection.document(loteId).update(
-                "booked" to cliente,
+                "booked" to clienteMap,
                 "dateBooked" to bookedTs,
                 "bookedByUser" to bookedByUser,
                 "bookedRemark" to bookedRemark
             )
+
+            println("✅ [GmrStockPlus] Lote $loteId actualizado: ${cliente?.cliNombre ?: "Liberado"}")
             true
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            println("❌ [GmrStockPlus] Error en updateLoteBooked: ${e.message}")
+            false
+        }
     }
 
     // --- LÓGICA VERTISOL ---

@@ -39,25 +39,34 @@ fun ComandaCard(
     onEditRemark: (() -> Unit)? = null,
     onAssignLote: (() -> Unit)? = null
 ) {
-    // 1. Identificamos si hay lotes físicos vinculados
-    val tieneAsignacionesReales = remember(comanda.listaAsignaciones) {
+    // 1. LÓGICA DE ASIGNACIÓN ESTRICTA
+    // Verificamos si TODAS las asignaciones de la lista tienen un número de lote
+    val todoAsignado = remember(comanda.listaAsignaciones) {
+        comanda.listaAsignaciones.isNotEmpty() &&
+                comanda.listaAsignaciones.all { it.numeroLote.isNotBlank() }
+    }
+
+    // Para el panel de acciones, comprobamos si hay al menos algo asignado
+    val tieneAlMenosUnLote = remember(comanda.listaAsignaciones) {
         comanda.listaAsignaciones.any { it.numeroLote.isNotBlank() }
     }
 
-    // 2. Identificamos si TODAS las asignaciones reales ya han sido vendidas
-    // (Para el feedback visual de la card antes de que se cierre la comanda)
+    // 2. Identificamos si hay una venta parcial (algún material vendido pero no todos)
     val totalAsignacionesConLote = comanda.listaAsignaciones.count { it.numeroLote.isNotBlank() }
     val asignacionesVendidas = comanda.listaAsignaciones.count { it.fueVendido }
     val esVentaParcial = asignacionesVendidas > 0 && asignacionesVendidas < totalAsignacionesConLote
 
-    val isLoteAsignado = tieneAsignacionesReales || comanda.numberLoteComanda.isNotBlank()
+    // La comanda se considera "Asignada" solo si TODO tiene lote o si tiene el lote global de cabecera
+    val isLoteAsignado = todoAsignado || (comanda.numberLoteComanda.isNotBlank() && comanda.listaAsignaciones.isEmpty())
+
     val cardBackground = if (comanda.fueVendidoComanda) ReservedColor.copy(alpha = 0.05f) else Color.White
 
+    // Determinamos el color de estado
     val statusColor = when {
         comanda.fueVendidoComanda -> Color.Gray
-        esVentaParcial -> Color(0xFF4CAF50) // Un verde intermedio para indicar progreso
+        esVentaParcial -> PrimaryColor
         isLoteAsignado -> PrimaryColor
-        else -> WarningColor
+        else -> WarningColor // Si falta algún lote por asignar, se queda en PENDIENTE (Naranja)
     }
 
     val isDelayed = remember(comanda.dateBookedComanda) {
@@ -81,6 +90,7 @@ fun ComandaCard(
         border = BorderStroke(if (isSelected) 2.dp else 1.dp, Color.LightGray.copy(alpha = 0.3f))
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            // Barra lateral
             Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(statusColor))
 
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -112,7 +122,7 @@ fun ComandaCard(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // --- CLIENTE ---
                         comanda.bookedClientComanda?.let { cliente ->
@@ -123,40 +133,83 @@ fun ComandaCard(
                             )
                         }
 
-                        // --- LISTADO DE MATERIALES CON ESTADO INDIVIDUAL ---
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // --- LISTADO DE MATERIALES ---
                         if (comanda.listaAsignaciones.isNotEmpty()) {
                             comanda.listaAsignaciones.forEach { asig ->
-                                // Solo mostramos el lote si existe
-                                val labelLote = if (asig.numeroLote.isNotBlank()) " [${asig.numeroLote}]" else " (Pendiente)"
+                                val hasLote = asig.numeroLote.isNotBlank()
 
-                                // CORRECCIÓN: El usuario de asignación solo se procesa si existe el lote
-                                // Si asig.userAsignacion está vacío, userSuffix será ""
-                                val userSuffix = if (asig.numeroLote.isNotBlank() && asig.userAsignacion.isNotBlank()) {
-                                    " • ${asig.userAsignacion.split("@").first()}"
-                                } else ""
+                                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "• ${asig.materialNombre}",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = if (hasLote) FontWeight.Bold else FontWeight.Medium,
+                                                textDecoration = if (asig.fueVendido) TextDecoration.LineThrough else TextDecoration.None
+                                            ),
+                                            color = if (comanda.fueVendidoComanda || asig.fueVendido) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (hasLote) {
+                                            Text(
+                                                text = " [${asig.numeroLote}]",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.ExtraBold),
+                                                color = if (asig.fueVendido) Color.Gray else PrimaryColor
+                                            )
+                                        } else {
+                                            Text(
+                                                text = " (Pendiente)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = WarningColor
+                                            )
+                                        }
 
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "• ${asig.materialNombre}$labelLote - ${asig.cantidadBB} BB$userSuffix",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            textDecoration = if (asig.fueVendido) TextDecoration.LineThrough else TextDecoration.None
-                                        ),
-                                        color = when {
-                                            comanda.fueVendidoComanda || asig.fueVendido -> Color.Gray
-                                            asig.numeroLote.isNotBlank() -> PrimaryColor
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                        fontWeight = if (asig.numeroLote.isNotBlank()) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                    if (asig.fueVendido && !comanda.fueVendidoComanda) {
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Icon(Icons.Default.CheckCircle, null, Modifier.size(12.dp), tint = Color(0xFF4CAF50))
+                                        if (asig.fueVendido && !comanda.fueVendidoComanda) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                                tint = PrimaryColor
+                                            )
+                                        }
+                                    }
+
+                                    if (hasLote) {
+                                        Row(
+                                            modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Inventory,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(11.dp),
+                                                tint = if (asig.fueVendido) Color.Gray else PrimaryColor.copy(alpha = 0.7f)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+
+                                            Text(
+                                                text = "${asig.cantidadBB} BB",
+                                                fontSize = 11.sp,
+                                                color = if (asig.fueVendido) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+
+                                            if (asig.userAsignacion.isNotBlank()) {
+                                                Text(
+                                                    text = " • Asignado por: ${asig.userAsignacion.split("@").first()}",
+                                                    fontSize = 10.sp,
+                                                    color = Color.Gray
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // --- INFO INFERIOR ---
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -234,7 +287,7 @@ fun ComandaCard(
                         ) {
                             ActionButton(
                                 icon = Icons.Default.Inventory,
-                                label = if (tieneAsignacionesReales) "Ver Lotes" else "Lote",
+                                label = if (tieneAlMenosUnLote) "Ver Lotes" else "Lote",
                                 color = PrimaryColor,
                                 onClick = { onAssignLote?.invoke() }
                             )
@@ -244,7 +297,6 @@ fun ComandaCard(
                             if (!isLoteAsignado) {
                                 ActionButton(Icons.Default.DeleteSweep, "Anular", ReservedColor) { onDelete?.invoke() }
                             } else {
-                                // Si hay algo vendido, bloqueamos el botón de acción para proteger la integridad
                                 ActionButton(
                                     icon = if (esVentaParcial) Icons.Default.LocalShipping else Icons.Default.Lock,
                                     label = if (esVentaParcial) "Cargando..." else "Asignado",

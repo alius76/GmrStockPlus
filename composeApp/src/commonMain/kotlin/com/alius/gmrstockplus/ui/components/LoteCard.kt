@@ -43,7 +43,7 @@ fun LoteCard(
     lote: LoteModel,
     certificado: Certificado?,
     certificadoIconColor: Color,
-    occupancyList: List<OccupancyInfo>, // 👈 Agregado para calcular stock disponible
+    occupancyList: List<OccupancyInfo>,
     modifier: Modifier = Modifier,
     scope: CoroutineScope,
     snackbarHostState: SnackbarHostState,
@@ -58,7 +58,7 @@ fun LoteCard(
     var showReservedDialog by remember { mutableStateOf(false) }
     var showRemarkDialog by remember { mutableStateOf(false) }
     var showAddRemarkDialog by remember { mutableStateOf(false) }
-    var showOccupancyDialog by remember { mutableStateOf(false) } // 👈 Nuevo estado
+    var showOccupancyDialog by remember { mutableStateOf(false) }
 
     val totalWeightNumber = lote.totalWeight.toDoubleOrNull() ?: 0.0
 
@@ -87,7 +87,7 @@ fun LoteCard(
                 .animateContentSize()
         ) {
 
-            // 1. CABECERA REESTRUCTURADA (Ahora con 5 botones)
+            // 1. CABECERA CON BOTONES REORGANIZADOS
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -108,7 +108,7 @@ fun LoteCard(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Reservado
+                    // 1. Reservado
                     IconButton(
                         onClick = {
                             currentBookedRemark = lote.bookedRemark ?: ""
@@ -124,7 +124,20 @@ fun LoteCard(
                         )
                     }
 
-                    // Observación
+                    // 2. Asignaciones (INTERCAMBIADO A POSICIÓN 2)
+                    IconButton(
+                        onClick = { showOccupancyDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DatasetLinked,
+                            contentDescription = "Ver asignaciones",
+                            tint = if (occupancyList.isNotEmpty()) PrimaryColor else Color.Gray,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // 3. Observación (INTERCAMBIADO A POSICIÓN 3)
                     IconButton(
                         onClick = {
                             currentRemarkText = lote.remark
@@ -141,20 +154,7 @@ fun LoteCard(
                         )
                     }
 
-                    // Asignaciones (NUEVO)
-                    IconButton(
-                        onClick = { showOccupancyDialog = true },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DatasetLinked,
-                            contentDescription = "Ver asignaciones",
-                            tint = if (occupancyList.isNotEmpty()) PrimaryColor else Color.Gray,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    // Certificado
+                    // 4. Certificado
                     IconButton(
                         onClick = { showCertificadoDialog = true },
                         modifier = Modifier.size(32.dp)
@@ -167,7 +167,7 @@ fun LoteCard(
                         )
                     }
 
-                    // BigBags
+                    // 5. BigBags
                     IconButton(
                         onClick = { showBigBagsDialog = true },
                         modifier = Modifier.size(32.dp)
@@ -186,39 +186,42 @@ fun LoteCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 2. BLOQUE DE DETALLES
+            // 2. BLOQUE DE DETALLES REORDENADO
             Box(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    DetailRow("Material", lote.description)
-                    DetailRow("Fecha", formatInstant(lote.date))
-                    DetailRow("Ubicación", lote.location)
 
-                    // Fila de Stock con icono Inventory (NUEVA LÓGICA)
+                    // --- STOCK DISPONIBLE (AHORA PRIMERO) ---
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Stock Disponible", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text("Stock Disponible", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = Color.Gray)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "$disponibles / $totalBB",
-                                fontWeight = FontWeight.Bold,
-                                color = if(disponibles > 0) PrimaryColor else Color.Red
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if(disponibles > 0) PrimaryColor else ReservedColor,
+                                fontSize = 16.sp
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Default.Inventory,
                                 contentDescription = null,
-                                tint = if(disponibles > 0) PrimaryColor else Color.Red,
-                                modifier = Modifier.size(16.dp)
+                                tint = if(disponibles > 0) PrimaryColor else ReservedColor,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
 
+                    // --- RESTO DE CAMPOS ---
+                    DetailRow("Material", lote.description)
+                    DetailRow("Fecha", formatInstant(lote.date))
+                    DetailRow("Ubicación", lote.location)
                     DetailRow("Peso total", "${formatWeight(totalWeightNumber)} Kg", PrimaryColor)
                 }
 
+                // Indicador visual de reserva
                 if (lote.booked != null && lote.booked.cliNombre.isNotBlank()) {
                     Surface(
                         color = ReservedColor,
@@ -230,28 +233,12 @@ fun LoteCard(
                             .height(48.dp)
                     ) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 2.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = "RESERVADO",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Clip
-                            )
-                            Text(
-                                text = lote.booked.cliNombre,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Text("RESERVADO", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp, maxLines = 1)
+                            Text(lote.booked.cliNombre, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -522,80 +509,122 @@ fun LoteCard(
             }
         }
     }
-// --- Diálogo de reservas con selección de cliente (Estructura Blindada y Lógica de Guardado Completa) ---
+
+
+    // --- Diálogo de Reservas Profesional con Freno de Seguridad y Bloqueo de Interacción ---
     if (showReservedDialog) {
+        var showConfirmNoOkDialog by remember { mutableStateOf(false) }
         var selectedCliente by remember { mutableStateOf(lote.booked) }
         var showClientesDialog by remember { mutableStateOf(false) }
         val userToSave = currentUserEmail
         var clientesList by remember { mutableStateOf<List<Cliente>?>(null) }
 
-        var linkedComanda by remember { mutableStateOf<Comanda?>(null) }
-        var isComandaLoading by remember { mutableStateOf(false) }
-
-        // Estado para las observaciones
-        var currentBookedRemark by remember { mutableStateOf(lote.bookedRemark?.trim() ?: "") }
-
-        // 🛡️ Lógica para detectar si el comentario ha cambiado
-        val remarkChanged = currentBookedRemark.trim() != (lote.bookedRemark?.trim() ?: "")
-
         val comandaRepository = remember { getComandaRepository(databaseUrl) }
-
         val noOkCliente = Cliente(cliNombre = "NO OK")
         val errorColor = MaterialTheme.colorScheme.error
         val cardShape = RoundedCornerShape(12.dp)
 
+        // --- LÓGICA DE ESTADOS Y BLOQUEO DE BOTÓN ---
+        val isNoOkInDatabase = lote.booked?.cliNombre == "NO OK"
         val isNoOkSelected = selectedCliente?.cliNombre == "NO OK"
         val isLoteReservedOrBlocked = lote.booked != null
-        val isBloqueoClickable = !isLoteReservedOrBlocked || isNoOkSelected
 
-        // 1. Cargar Clientes
+        // REGLA: El botón de bloqueo solo es clickable si el lote NO está bloqueado ya en la DB.
+        // Si ya está bloqueado, obligamos a usar "Anular" para rehabilitarlo.
+        val isBloqueoClickable = !isNoOkInDatabase
+
+        var currentBookedRemark by remember { mutableStateOf(lote.bookedRemark?.trim() ?: "") }
+
+        val otrosClientesAsignados = occupancyList
+            .map { it.cliente }
+            .filter { it != selectedCliente?.cliNombre }
+            .distinct()
+
+        val hayConflicto = otrosClientesAsignados.isNotEmpty() && !isNoOkSelected
+        val remarkChanged = currentBookedRemark.trim() != (lote.bookedRemark?.trim() ?: "")
+
+        // --- FUNCIÓN CENTRALIZADA DE GUARDADO ---
+        val ejecutarGuardadoLote = {
+            scope.launch {
+                if (isNoOkSelected) {
+                    occupancyList.forEach { occ ->
+                        comandaRepository.getComandaByNumber(occ.numeroComanda)?.let { cmd ->
+                            comandaRepository.quitarAsignacionLote(cmd.idComanda, lote.number)
+                        }
+                    }
+                }
+
+                val remarkToSave = currentBookedRemark.trim().ifBlank { null }
+                val success = loteRepository.updateLoteBooked(
+                    lote.id,
+                    selectedCliente,
+                    lote.dateBooked ?: kotlinx.datetime.Clock.System.now(),
+                    userToSave,
+                    remarkToSave
+                )
+
+                if (success) {
+                    onRemarkUpdated(lote.copy(
+                        booked = selectedCliente,
+                        bookedByUser = userToSave,
+                        bookedRemark = remarkToSave
+                    ))
+                    snackbarHostState.showSnackbar(
+                        if (isNoOkSelected) "Lote BLOQUEADO y asignaciones liberadas"
+                        else "Reserva guardada correctamente"
+                    )
+                }
+            }
+        }
+
         LaunchedEffect(Unit) {
             val allClients = clientRepository.getAllClientsOrderedByName()
             clientesList = allClients.filter { it.cliNombre != "NO OK" }
         }
 
-        // 2. Cargar Comanda vinculada
-        LaunchedEffect(lote.number) {
-            if (isLoteReservedOrBlocked) {
-                isComandaLoading = true
-                try {
-                    val comanda = comandaRepository.getComandaByLoteNumber(lote.number)
-
-                    linkedComanda = if (comanda != null && !comanda.fueVendidoComanda) {
-                        comanda
-                    } else {
-                        null
-                    }
-
-                } catch (e: Exception) {
-                    linkedComanda = null
-                } finally {
-                    isComandaLoading = false
-                }
-            }
-        }
-
-
         AlertDialog(
             onDismissRequest = { showReservedDialog = false },
-            modifier = Modifier
-                .width(360.dp) // Ancho Fijo
-                .height(650.dp), // Altura Fija Total
+            modifier = Modifier.width(360.dp).wrapContentHeight(),
             title = {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Reserva del lote", fontWeight = FontWeight.Bold, color = PrimaryColor)
-                        Text(lote.number, fontWeight = FontWeight.Bold, color = PrimaryColor)
+                        Text(
+                            text = "Reserva del lote",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        )
+                        Text(
+                            text = lote.number,
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = PrimaryColor
+                        )
                     }
                 }
             },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     lote.bookedByUser?.takeIf { it.isNotBlank() }?.let {
-                        InfoCard(label = "Reservado por", value = it)
+                        InfoCard(label = "Gestionado por", value = it)
+                    }
+
+                    if (occupancyList.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                            shape = cardShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryColor, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Lote presente en ${occupancyList.size} asignación(es).",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
                     }
 
                     // --- 1. SELECCIÓN DE CLIENTE ---
@@ -605,53 +634,39 @@ fun LoteCard(
                             .height(56.dp)
                             .border(
                                 width = 1.dp,
-                                color = if (selectedCliente != null && !isNoOkSelected) PrimaryColor
+                                color = if (hayConflicto) errorColor
+                                else if (selectedCliente != null && !isNoOkSelected) PrimaryColor
                                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                                 shape = cardShape
                             )
                             .clip(cardShape)
+                            // Si está bloqueado por calidad, no permitimos cambiar de cliente
                             .clickable(enabled = !isLoteReservedOrBlocked) { showClientesDialog = true }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Text(
-                            text = if (isNoOkSelected) "BLOQUEO ACTIVO" else (selectedCliente?.cliNombre ?: "Seleccione cliente"),
+                            text = if (isNoOkSelected) "BLOQUEO CALIDAD" else (selectedCliente?.cliNombre ?: "Seleccione cliente"),
                             color = if (isNoOkSelected) errorColor else if (selectedCliente != null) PrimaryColor else TextSecondary
                         )
                     }
 
-                    // --- 2. SECCIÓN DE COMANDA ASOCIADA (Altura Fija) ---
-                    Text("Comanda vinculada", fontWeight = FontWeight.Bold)
-
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .height(150.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
-                        .padding(4.dp)) {
-
-                        if (isComandaLoading) {
-                            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center).size(30.dp), color = PrimaryColor)
-                        } else if (linkedComanda != null) {
-                            ComandaLoteCard(comanda = linkedComanda!!, isSelected = true, onClick = { })
-                        } else {
-                            Text(
-                                "Sin comanda asociada.",
-                                modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                                color = TextSecondary,
-                                textAlign = TextAlign.Center,
-                                fontSize = 13.sp
-                            )
-                        }
+                    if (hayConflicto) {
+                        Text(
+                            "Ya asignado a: ${otrosClientesAsignados.joinToString()}. Libere las asignaciones antes de reservar.",
+                            color = errorColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 14.sp
+                        )
                     }
 
-                    // --- 3. OBSERVACIONES (Altura Fija Blindada) ---
+                    // --- 2. OBSERVACIONES ---
                     OutlinedTextField(
                         value = currentBookedRemark,
                         onValueChange = { currentBookedRemark = it },
                         label = { Text("Observaciones de reserva") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp),
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
                         singleLine = false,
                         shape = cardShape,
                         colors = TextFieldDefaults.outlinedTextFieldColors(
@@ -661,11 +676,10 @@ fun LoteCard(
                         )
                     )
 
-                    // --- 4. BLOQUEO INTERNO (Efectos Reforzados) ---
-                    val isBlocked = isNoOkSelected
-                    val bloqueoBgColor = if (isBlocked) errorColor.copy(alpha = 0.15f) else errorColor.copy(alpha = 0.05f)
-                    val bloqueoStrokeColor = if (isBlocked) errorColor else errorColor.copy(alpha = 0.3f)
-                    val bloqueoStrokeWidth = if (isBlocked) 2.dp else 1.dp
+                    // --- 3. BLOQUEO INTERNO (LÓGICA DE INTERACTIVIDAD) ---
+                    val bloqueoBgColor = if (isNoOkSelected) errorColor.copy(alpha = 0.15f) else errorColor.copy(alpha = 0.05f)
+                    val bloqueoStrokeColor = if (isNoOkSelected) errorColor else errorColor.copy(alpha = 0.3f)
+                    val bloqueoStrokeWidth = if (isNoOkSelected) 2.dp else 1.dp
 
                     Surface(
                         shape = cardShape,
@@ -676,12 +690,12 @@ fun LoteCard(
                             .clip(cardShape)
                             .background(bloqueoBgColor)
                             .then(
+                                // APLICA TU REGLA: Solo clickable si no estaba ya bloqueado en la DB
                                 if (isBloqueoClickable) Modifier.clickable {
-                                    selectedCliente = if (isBlocked) null else noOkCliente
-                                }
-                                else Modifier
+                                    selectedCliente = if (isNoOkSelected) null else noOkCliente
+                                } else Modifier
                             ),
-                        shadowElevation = if (isBlocked) 4.dp else 0.dp
+                        shadowElevation = if (isNoOkSelected) 4.dp else 0.dp
                     ) {
                         Row(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -689,19 +703,30 @@ fun LoteCard(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = if (isBlocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                imageVector = if (isNoOkSelected) Icons.Default.Lock else Icons.Default.LockOpen,
                                 contentDescription = null,
                                 tint = bloqueoStrokeColor,
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = if (isBlocked) "BLOQUEO ACTIVADO" else "BLOQUEO INTERNO",
+                                text = if (isNoOkSelected) "BLOQUEO ACTIVO" else "BLOQUEO INTERNO",
                                 color = bloqueoStrokeColor,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 16.sp
                             )
                         }
+                    }
+
+                    // Mensaje de ayuda si está bloqueado
+                    if (!isBloqueoClickable && isNoOkInDatabase) {
+                        Text(
+                            text = "Para quitar el bloqueo activo use el botón 'Anular'",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = errorColor,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             },
@@ -711,59 +736,44 @@ fun LoteCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // BOTÓN ANULAR
                     if (isLoteReservedOrBlocked) {
                         TextButton(onClick = {
                             showReservedDialog = false
                             scope.launch {
-                                var success = true
-                                linkedComanda?.let {
-                                    val comandaCleanSuccess = comandaRepository.updateComandaLoteNumber(it.idComanda, "")
-                                    if (!comandaCleanSuccess) success = false
-                                }
-                                val loteCleanSuccess = loteRepository.updateLoteBooked(lote.id, null, null, null, null)
-                                if (!loteCleanSuccess) success = false
-
+                                val success = loteRepository.updateLoteBooked(lote.id, null, null, null, null)
                                 if (success) {
                                     onRemarkUpdated(lote.copy(booked = null, dateBooked = null, bookedByUser = null, bookedRemark = null))
-                                    snackbarHostState.showSnackbar("Reserva anulada")
+                                    snackbarHostState.showSnackbar("Estado de lote reseteado")
                                 }
                             }
                         }) { Text("Anular", color = errorColor) }
                     } else Spacer(modifier = Modifier.width(1.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { showReservedDialog = false }) { Text("Cancelar", color = PrimaryColor) }
+                        TextButton(onClick = { showReservedDialog = false }) {
+                            Text("Cancelar", color = PrimaryColor)
+                        }
 
                         TextButton(
                             onClick = {
                                 if (selectedCliente == null) return@TextButton
-                                showReservedDialog = false
-                                val remarkToSave = currentBookedRemark.trim().ifBlank { null }
-                                scope.launch {
-                                    val success = loteRepository.updateLoteBooked(
-                                        lote.id,
-                                        selectedCliente,
-                                        lote.dateBooked ?: kotlinx.datetime.Clock.System.now(),
-                                        userToSave,
-                                        remarkToSave
-                                    )
-                                    if (success) {
-                                        onRemarkUpdated(lote.copy(
-                                            booked = selectedCliente,
-                                            bookedByUser = userToSave,
-                                            bookedRemark = remarkToSave
-                                        ))
-                                        snackbarHostState.showSnackbar("Cambios guardados")
-                                    }
+
+                                // Freno de seguridad: solo si el bloqueo es NUEVO y hay ocupación
+                                if (isNoOkSelected && occupancyList.isNotEmpty() && !isNoOkInDatabase) {
+                                    showConfirmNoOkDialog = true
+                                } else {
+                                    showReservedDialog = false
+                                    ejecutarGuardadoLote()
                                 }
                             },
-                            // 🔥 Habilitado si hay un cliente seleccionado Y (es nuevo bloqueo/reserva O el texto ha cambiado)
-                            enabled = selectedCliente != null && (!isLoteReservedOrBlocked || remarkChanged)
+                            enabled = selectedCliente != null && !hayConflicto &&
+                                    (!isLoteReservedOrBlocked || remarkChanged || (isNoOkSelected && !isNoOkInDatabase))
                         ) {
+                            val isEnabled = selectedCliente != null && !hayConflicto &&
+                                    (!isLoteReservedOrBlocked || remarkChanged || (isNoOkSelected && !isNoOkInDatabase))
                             Text(
                                 "Guardar",
-                                color = if (selectedCliente != null && (!isLoteReservedOrBlocked || remarkChanged)) PrimaryColor else TextSecondary,
+                                color = if (isEnabled) PrimaryColor else TextSecondary,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -771,6 +781,87 @@ fun LoteCard(
                 }
             }
         )
+
+        // --- DIÁLOGO DE ADVERTENCIA
+        if (showConfirmNoOkDialog) {
+            AlertDialog(
+                onDismissRequest = { showConfirmNoOkDialog = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showConfirmNoOkDialog = false
+                        showReservedDialog = false
+                        ejecutarGuardadoLote()
+                    }) {
+                        Text(
+                            text = "Confirmar",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmNoOkDialog = false }) {
+                        Text("Cancelar", color = PrimaryColor)
+                    }
+                },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Bloqueo de calidad",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("El lote se marcará como NO OK. Esto desvinculará automáticamente todas sus asignaciones actuales.")
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("Lote: ${lote.number}", fontWeight = FontWeight.Bold)
+                                Text("Asignaciones afectadas: ${occupancyList.size}", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Resultado: El stock quedará bloqueado y se eliminará de las comandas vinculadas para evitar su carga.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = Color.Gray
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Solicitado por: $currentUserEmail",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+        }
 
         if (showClientesDialog) {
             ClientesSelectedDialogContent(
@@ -784,6 +875,7 @@ fun LoteCard(
                 }
             )
         }
+    }
 
         // --- NUEVO: Diálogo de Asignaciones (Occupancy) ---
         if (showOccupancyDialog) {
@@ -796,5 +888,5 @@ fun LoteCard(
     }
 
 
-}
+
 

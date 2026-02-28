@@ -39,9 +39,12 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
             val comanda = this.data<Comanda>()
             val firebaseDate = try { this.get<Timestamp>("dateBookedComanda") } catch (e: Exception) { null }
 
+            // 🛡️ Blindaje extra para la lista de asignaciones
             comanda.copy(
                 idComanda = this.id,
-                dateBookedComanda = firebaseDate?.let { Instant.fromEpochSeconds(it.seconds, it.nanoseconds) } ?: comanda.dateBookedComanda
+                dateBookedComanda = firebaseDate?.let { Instant.fromEpochSeconds(it.seconds, it.nanoseconds) } ?: comanda.dateBookedComanda,
+                // Aseguramos que si por algún error listaAsignaciones es null en DB, no crashee
+                listaAsignaciones = comanda.listaAsignaciones ?: emptyList()
             )
         } catch (e: Exception) {
             println("❌ Error mapeando comanda ${this.id}: ${e.message}")
@@ -249,30 +252,47 @@ class ComandaRepositoryImpl(private val plantName: String) : ComandaRepository {
 
             firestore.runTransaction {
                 val snapshot = get(docRef)
-                val comanda = snapshot.data<Comanda>()
+                // Usamos toComandaSafe para asegurar integridad de la lista al leer
+                val comanda = snapshot.toComandaSafe() ?: return@runTransaction
                 val listaActual = comanda.listaAsignaciones.toMutableList()
 
-                val indice = listaActual.indexOfFirst { it.numeroLote == loteNumber }
+                // 1. Buscamos la asignación que queremos quitar
+                val asignacionAQuitar = listaActual.find { it.numeroLote == loteNumber } ?: return@runTransaction
+                val materialNombre = asignacionAQuitar.materialNombre
 
-                if (indice != -1) {
-                    val asignacionLimpia = listaActual[indice].copy(
-                        idLote = "",
-                        numeroLote = "",
-                        cantidadBB = 0,
-                        userAsignacion = "",
-                        fueVendido = false
-                    )
-                    listaActual[indice] = asignacionLimpia
+                // 2. Contamos cuántos registros existen de este mismo material
+                val registrosDelMismoMaterial = listaActual.filter { it.materialNombre == materialNombre }
 
-                    update(docRef,
-                        "listaAsignaciones" to listaActual.map { it.toMap() }, // Convertir lista completa
-                        "numberLoteComanda" to ""
-                    )
+                if (registrosDelMismoMaterial.size > 1) {
+                    // CASO A: Hay más de un registro. Eliminamos este registro por completo.
+                    listaActual.remove(asignacionAQuitar)
+                } else {
+                    // CASO B: Es el último registro de este material.
+                    // Lo reseteamos a vacío para mantener el materialNombre (Pendiente).
+                    val indice = listaActual.indexOf(asignacionAQuitar)
+                    if (indice != -1) {
+                        listaActual[indice] = asignacionAQuitar.copy(
+                            idLote = "",
+                            numeroLote = "",
+                            cantidadBB = 0,
+                            userAsignacion = "",
+                            fueVendido = false
+                        )
+                    }
                 }
+
+                // 3. Actualizamos el documento con la lista procesada
+                // Importante: Si la lista queda vacía (que no debería por la lógica del material),
+                // mapeamos a toMap() para consistencia con iOS.
+                update(docRef,
+                    "listaAsignaciones" to listaActual.map { it.toMap() },
+                    // Si quitamos el lote principal, limpiamos el campo legacy también
+                    "numberLoteComanda" to if (comanda.numberLoteComanda == loteNumber) "" else comanda.numberLoteComanda
+                )
             }
             true
         } catch (e: Exception) {
-            println("❌ Error en quitarAsignacionLote (Reset): ${e.message}")
+            println("❌ Error en quitarAsignacionLote (Inteligente): ${e.message}")
             false
         }
     }

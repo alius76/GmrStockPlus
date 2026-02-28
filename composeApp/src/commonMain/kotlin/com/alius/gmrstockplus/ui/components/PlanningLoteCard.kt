@@ -4,15 +4,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.automirrored.filled.ViewList
-import androidx.compose.material.icons.filled.AssignmentInd
 import androidx.compose.material.icons.filled.DatasetLinked
-import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Inventory
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +28,6 @@ import com.alius.gmrstockplus.domain.model.LoteModel
 import com.alius.gmrstockplus.domain.model.OccupancyInfo
 import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import com.alius.gmrstockplus.ui.theme.ReservedColor
-import kotlinx.coroutines.launch
 
 @Composable
 fun AssignmentBadge(text: String, color: Color, alpha: Float = 0.8f) {
@@ -85,7 +80,7 @@ fun PlanningLoteCard(
     val totalAsignado = occupancyList.sumOf { it.cantidad }
     val disponibles = (totalBB - totalAsignado).coerceAtLeast(0)
 
-    // --- Lógica Central de Estado por Línea ---
+    // --- Lógica Central de Estado ---
     val asignacionEnComanda = remember(comanda.listaAsignaciones, lote.number) {
         comanda.listaAsignaciones.find { it.numeroLote == lote.number }
     }
@@ -93,9 +88,10 @@ fun PlanningLoteCard(
     val isAssignedToThisComanda = asignacionEnComanda != null
     val isLoteYaVendidoEnComanda = asignacionEnComanda?.fueVendido ?: false
 
+    // Lógica de Reserva (Original recuperada)
+    val isReservedForThisClient = loteBookedClientName != null && loteBookedClientName == comandaClientName
     val isReservedByOther = loteBookedClientName != null && loteBookedClientName != comandaClientName
 
-    // Lógica de Estado de Certificado
     val certColor = when (certificado?.status) {
         CertificadoStatus.ADVERTENCIA -> MaterialTheme.colorScheme.error
         CertificadoStatus.CORRECTO -> PrimaryColor
@@ -116,7 +112,10 @@ fun PlanningLoteCard(
             }
         ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isReservedByOther) ReservedColor.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                isReservedByOther -> ReservedColor.copy(alpha = 0.05f)
+                else -> MaterialTheme.colorScheme.surface
+            }
         )
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
@@ -155,9 +154,8 @@ fun PlanningLoteCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- 2. DETALLES BÁSICOS Y STOCK (MODIFICADO) ---
+            // --- 2. DETALLES BÁSICOS Y STOCK ---
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Primera línea: Stock disponible y relación de BigBags con icono
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -168,28 +166,24 @@ fun PlanningLoteCard(
                         Text(
                             text = "$disponibles / $totalBB",
                             fontWeight = FontWeight.Bold,
-                            color = if(disponibles > 0) PrimaryColor else Color.Red
+                            color = if(disponibles > 0) PrimaryColor else ReservedColor
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Default.Inventory,
                             contentDescription = null,
-                            tint = if(disponibles > 0) PrimaryColor else Color.Red,
+                            tint = if(disponibles > 0) PrimaryColor else ReservedColor,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
-
-                // Segunda línea: Ubicación
                 DetailRow("Ubicación", lote.location)
-
-                // Tercera línea: Peso
                 DetailRow("Peso total", "${formatWeight(totalWeightNumber)} Kg", PrimaryColor)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- 4. ESTADO DE RESERVA / ASIGNACIÓN ---
+            // --- 3. ESTADO DE RESERVA / ASIGNACIÓN (ESTÉTICA ORIGINAL) ---
             when {
                 isComandaVendida -> {
                     AssignmentBadge(text = "COMANDA VENDIDA", color = Color.Gray, alpha = 0.5f)
@@ -199,6 +193,10 @@ fun PlanningLoteCard(
                 }
                 isAssignedToThisComanda -> {
                     AssignmentBadge(text = "ASIGNADO A ESTA COMANDA", color = PrimaryColor, alpha = 0.6f)
+                }
+                isReservedForThisClient -> {
+                    // Estética Original: PrimaryColor con transparencia para pre-reserva
+                    AssignmentBadge(text = "PRE-RESERVADO para $comandaClientName", color = PrimaryColor, alpha = 0.2f)
                 }
                 isReservedByOther -> {
                     AssignmentBadge(text = "RESERVADO por ${loteBookedClientName!!}", color = ReservedColor)
@@ -210,7 +208,7 @@ fun PlanningLoteCard(
                 }
             }
 
-            // --- 5. BOTÓN DE ACCIÓN CON BLOQUEO POR VENTA ---
+            // --- 4. BOTÓN DE ACCIÓN (ESTÉTICA ORIGINAL) ---
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
@@ -226,7 +224,7 @@ fun PlanningLoteCard(
                         isComandaVendida || isLoteYaVendidoEnComanda -> Color.LightGray.copy(alpha = 0.4f)
                         isAssignedToThisComanda -> MaterialTheme.colorScheme.error
                         isReservedByOther || disponibles <= 0 -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                        else -> PrimaryColor
+                        else -> PrimaryColor // Incluye el caso de Pre-reserva al cliente con PrimaryColor
                     },
                     contentColor = if (isComandaVendida || isLoteYaVendidoEnComanda) Color.DarkGray else Color.White
                 ),
@@ -237,6 +235,7 @@ fun PlanningLoteCard(
                         isComandaVendida -> "LECTURA: VENTA FINALIZADA"
                         isLoteYaVendidoEnComanda -> "CARGA COMPLETADA"
                         isAssignedToThisComanda -> "Anular asignación"
+                        isReservedForThisClient -> "Confirmar asignación"
                         disponibles <= 0 -> "SIN STOCK DISPONIBLE"
                         isReservedByOther -> "LOTE BLOQUEADO"
                         else -> "Asignar este lote"
@@ -306,11 +305,11 @@ fun PlanningLoteCard(
 
     if (showConfirmAnulationDialog) {
         ConfirmAnulationDialog(
-            loteNumber = lote.number,
+            lote = lote,
             comandaNumber = comanda.numeroDeComanda.toString(),
             currentUserEmail = currentUserEmail,
-            onConfirm = {
-                onAssignLote(lote, false, 0)
+            onConfirm = { shouldClearBooking ->
+                onAssignLote(lote, shouldClearBooking, 0)
                 showConfirmAnulationDialog = false
             },
             onDismiss = { showConfirmAnulationDialog = false }

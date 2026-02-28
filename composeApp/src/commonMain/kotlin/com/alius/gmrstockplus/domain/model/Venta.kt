@@ -7,15 +7,18 @@ import kotlinx.datetime.Instant
 @Serializable
 data class Venta(
     val ventaCliente: String = "",
-    val ventaIdComanda: String? = null,
+    val ventaIdComanda: String? = null, // ID técnico de Firestore
+    val ventaNumeroComanda: Long = 0L,   // <--- AÑADIR ESTE CAMPO (Trazabilidad legible)
     val ventaLote: String = "",
     val ventaMaterial: String = "",
+
     @Serializable(with = FirebaseInstantSerializer::class)
-    val ventaFecha: Instant?,
+    val ventaFecha: Instant? = null,
+
     val ventaPesoTotal: String? = null,
     val ventaBigbags: List<VentaBigbag> = emptyList(),
 
-    //Nuevos campos
-    val ventaUser: String = "",
+    // Campos de control y auditoría
+    val ventaUser: String = "", // Aquí registrarás el usuario de la reserva/comando
     val ventaFinalizaComanda: Boolean = false
 )
