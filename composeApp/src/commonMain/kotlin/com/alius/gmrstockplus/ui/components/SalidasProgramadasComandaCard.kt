@@ -1,21 +1,10 @@
 package com.alius.gmrstockplus.ui.components
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,39 +15,40 @@ import com.alius.gmrstockplus.domain.model.Comanda
 import com.alius.gmrstockplus.ui.theme.PrimaryColor
 import com.alius.gmrstockplus.core.utils.formatWeight
 import com.alius.gmrstockplus.ui.theme.ReservedColor
-
+import com.alius.gmrstockplus.ui.theme.WarningColor
 
 @Composable
 fun SalidasProgramadasComandaCard(
     comanda: Comanda,
-    onClick: () -> Unit,
-    isSelected: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Determinar si fue vendida/cargada
+    // --- LÓGICA DE ESTADOS (Mantenemos tu nueva lógica de materiales) ---
     val isCargada = comanda.fueVendidoComanda
 
-    // Color de fondo (Tu lógica original, se mantiene)
-    val backgroundColor = if (isCargada) Color.White else Color.White
+    val todoAsignado = remember(comanda.listaAsignaciones) {
+        comanda.listaAsignaciones.isNotEmpty() &&
+                comanda.listaAsignaciones.all { it.numeroLote.isNotBlank() }
+    }
 
-    // --- Colores Definidos ---
-    // 1. Color para el número de comanda (siempre PrimaryColor)
-    val comandaNumberColor = PrimaryColor
+    val totalAsignacionesConLote = comanda.listaAsignaciones.count { it.numeroLote.isNotBlank() }
+    val asignacionesVendidas = comanda.listaAsignaciones.count { it.fueVendido }
+    val esVentaParcial = asignacionesVendidas > 0 && asignacionesVendidas < totalAsignacionesConLote
 
-    // 2. Color para el ElevatedCard de estado (CARGADO vs PENDIENTE)
-    val statusCardColor = if (isCargada) PrimaryColor else MaterialTheme.colorScheme.secondary
+    val isLoteAsignado = todoAsignado || (comanda.numberLoteComanda.isNotBlank() && comanda.listaAsignaciones.isEmpty())
 
-    // 3. Color para el borde de selección (Usando PrimaryColor para consistencia en la selección)
-    val borderColor = if (isSelected) PrimaryColor else Color.LightGray.copy(alpha = 0.5f)
-    val borderWidth = if (isSelected) 3.dp else 1.dp
+    // Definición de colores y etiquetas
+    val (statusColor, statusText) = when {
+        isCargada -> Color.Gray to "CARGADO"
+        esVentaParcial -> PrimaryColor to "PARCIAL"
+        isLoteAsignado -> PrimaryColor to "ASIGNADO"
+        else -> WarningColor to "PENDIENTE"
+    }
 
+    // Card Original: Sin onClick, sin bordes de selección, elevación estándar
     Card(
-        onClick = onClick, // Habilita el click y el ripple effect
-        modifier = modifier
-            .fillMaxWidth()
-            .border(borderWidth, borderColor, RoundedCornerShape(16.dp)), // Aplicar borde condicional
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -69,25 +59,22 @@ fun SalidasProgramadasComandaCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Título de la Comanda formateado
                 val formattedComandaNumber = comanda.numeroDeComanda.toString().padStart(6, '0')
                 Text(
                     text = "#$formattedComandaNumber",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = comandaNumberColor // 1. Siempre PrimaryColor
+                    color = if (isCargada) Color.Gray else PrimaryColor
                 )
 
-                // Estado (Cargado / Pendiente)
-                ElevatedCard(
-                    colors = CardDefaults.cardColors(
-                        // 2. Color definido por el estado
-                        containerColor = statusCardColor.copy(alpha = 0.8f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                // Estado (Originalmente usaba ElevatedCard o Surface)
+                Surface(
+                    color = statusColor.copy(alpha = 0.8f),
+                    shape = RoundedCornerShape(8.dp),
+                    shadowElevation = 2.dp
                 ) {
                     Text(
-                        text = if (isCargada) "CARGADO" else "PENDIENTE",
+                        text = statusText,
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp,
@@ -97,8 +84,7 @@ fun SalidasProgramadasComandaCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            // 🔑 MODIFICACIÓN: Primer Divider siempre de PrimaryColor con transparencia
-            Divider(color = PrimaryColor.copy(alpha = 0.3f))
+            HorizontalDivider(color = PrimaryColor.copy(alpha = 0.3f))
             Spacer(modifier = Modifier.height(12.dp))
 
             // FILA 2: Cliente
@@ -106,21 +92,43 @@ fun SalidasProgramadasComandaCard(
                 text = comanda.bookedClientComanda?.cliNombre ?: "Cliente no especificado",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.DarkGray
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // FILA 3: Material
-            Text(
-                text = "Material: ${comanda.descriptionLoteComanda ?: "N/A"}",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth()
+                color = if (isCargada) Color.Gray else Color.DarkGray
             )
 
-            // FILA 3.1: Peso (totalWeightComanda)
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // FILA 3: Listado de Materiales (La gran mejora)
+            if (comanda.listaAsignaciones.isNotEmpty()) {
+                comanda.listaAsignaciones.forEach { asig ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "• ${asig.materialNombre}",
+                            fontSize = 15.sp,
+                            color = if (asig.fueVendido) Color.Gray else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (asig.numeroLote.isNotBlank()) FontWeight.Bold else FontWeight.Medium
+                        )
+                        if (asig.numeroLote.isNotBlank()) {
+                            Text(
+                                text = " [${asig.numeroLote}]",
+                                fontSize = 14.sp,
+                                color = if (asig.fueVendido) Color.Gray else PrimaryColor,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Material: ${comanda.descriptionLoteComanda ?: "N/A"}",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // FILA 4: Peso
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val weight = comanda.totalWeightComanda.toDoubleOrNull() ?: 0.0
                 Text(
@@ -130,46 +138,43 @@ fun SalidasProgramadasComandaCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            // FILA 4: Lote Asignado
-            if (comanda.numberLoteComanda?.isNotBlank() == true) {
+            // FILA 5: Lote Asignado (Mantenemos tu lógica visual original)
+            if (comanda.numberLoteComanda.isNotBlank() && comanda.listaAsignaciones.isEmpty()) {
                 Text(
                     text = "Lote: ${comanda.numberLoteComanda}",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    // Lote Asignado -> MaterialTheme.colorScheme.onSurfaceVariant
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else if (!isCargada) {
+            } else if (!isCargada && !isLoteAsignado && comanda.listaAsignaciones.isEmpty()) {
                 Text(
                     text = "Lote: SIN ASIGNAR",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    // Lote No Asignado -> ReservedColor
                     color = ReservedColor
                 )
             }
 
-            // FILA 5: Observaciones
-            comanda.remarkComanda?.let { remark ->
-                if (remark.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Divider(color = Color.LightGray.copy(alpha = 0.5f))
-                    Spacer(modifier = Modifier.height(8.dp))
+            // FILA 6: Observaciones
+            if (!comanda.remarkComanda.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Text(
-                        text = "Observaciones:",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = remark,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "Observaciones:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = comanda.remarkComanda,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

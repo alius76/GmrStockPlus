@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable // Importante para el click externo
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -38,30 +39,21 @@ import kotlin.math.abs
 fun SalidasProgramadasBottomSheet(
     databaseUrl: String,
     snackbarHostState: SnackbarHostState,
-    // Dejo onComandaClick para mantener la API externa, aunque internamente solo gestionemos la selección visual.
     onComandaClick: (Comanda) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    // Inicialización del repositorio de Comanda
     val comandaRepository: ComandaRepository = remember { getComandaRepository(databaseUrl) }
 
     var comandasHoy by remember { mutableStateOf<List<Comanda>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    // 🆕 ESTADO DE SELECCIÓN: Guarda la ID de la comanda actualmente seleccionada visualmente
-    var selectedComandaId by remember { mutableStateOf<String?>(null) }
-
-
     val density = LocalDensity.current
     val pagerBoxHeightDp = 420.dp
 
-    // --- CÁLCULO Y FORMATO DE FECHA ADAPTADO A TU UTILS ---
     val today: LocalDate = remember {
-        // Obtenemos la fecha de hoy en la zona horaria del sistema
         Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
     }
 
-    // 1. Formato para la Interfaz (dd/MM/yyyy)
     val todayDateStringUI = remember {
         val d = today.dayOfMonth.toString().padStart(2, '0')
         val m = today.monthNumber.toString().padStart(2, '0')
@@ -69,38 +61,27 @@ fun SalidasProgramadasBottomSheet(
         "$d/$m/$y"
     }
 
-    // 2. Formato para la Query (YYYY-MM-DD)
     val todayDateFilter = remember {
         val d = today.dayOfMonth.toString().padStart(2, '0')
         val m = today.monthNumber.toString().padStart(2, '0')
         val y = today.year
-        // Requerido por tu buildQueryPorFecha: YYYY-MM-DD
         "$y-$m-$d"
     }
 
-    // Función de carga adaptada
     val loadComandasForToday: () -> Unit = {
         scope.launch {
             isLoading = true
             try {
-                // Usamos listarComandas con el filtro de fecha (YYYY-MM-DD)
                 val loadedComandas = comandaRepository.listarComandas(todayDateFilter)
-
-                // Ordenamos por la marca de tiempo de reserva (Instant)
                 comandasHoy = loadedComandas.sortedBy { it.dateBookedComanda }
-
             } catch (e: Exception) {
-                if (e is CancellationException) {
-                    // Manejo silencioso de la cancelación
-                } else {
+                if (e !is CancellationException) {
                     scope.launch {
                         snackbarHostState.showSnackbar("Error cargando comandas: ${e.message}")
                     }
                 }
             } finally {
-                if (scope.isActive) {
-                    isLoading = false
-                }
+                if (scope.isActive) isLoading = false
             }
         }
     }
@@ -111,7 +92,6 @@ fun SalidasProgramadasBottomSheet(
 
     val pagerState = rememberPagerState(initialPage = 0) { comandasHoy.size }
 
-    // --- UI ---
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -133,7 +113,6 @@ fun SalidasProgramadasBottomSheet(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Contenedor de Altura Fija para Pager/Carga/Vacío
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -150,18 +129,12 @@ fun SalidasProgramadasBottomSheet(
                     color = Color.Gray
                 )
             } else {
-                // --- 1. VERTICAL PAGER (El Carrusel) ---
                 VerticalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 60.dp)
                 ) { index ->
                     val comanda = comandasHoy[index]
-
-                    // 🆕 Determinar si esta tarjeta está seleccionada
-                    val isSelected = comanda.idComanda == selectedComandaId
-
-                    // Cálculo del Page Offset para las animaciones (mismo efecto 3D)
                     val pageOffset = (pagerState.currentPage - index + pagerState.currentPageOffsetFraction)
 
                     val scale by animateFloatAsState(
@@ -182,31 +155,25 @@ fun SalidasProgramadasBottomSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .graphicsLayer { // Aplicar las animaciones 3D
+                            .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
                                 this.alpha = alpha
                                 translationY = translation
-                            },
+                            }
+                            // 🆕 El click se maneja en el contenedor Box para no alterar la Card
+                            .clickable { onComandaClick(comanda) },
                         contentAlignment = Alignment.Center
                     ) {
-                        // 🆕 Pasar el estado de selección y la función onClick
+                        // 🆕 Llamada limpia a la Card (sin isSelected ni onClick interno)
                         SalidasProgramadasComandaCard(
                             comanda = comanda,
-                            onClick = {
-                                // Alterna el estado de selección
-                                selectedComandaId = if (isSelected) null else comanda.idComanda
-
-                                // Llama a la acción externa (si la hubiera, aunque el requisito es solo visual)
-                                // onComandaClick(comanda)
-                            },
-                            isSelected = isSelected, // Pasar el estado
                             modifier = Modifier.fillMaxWidth(0.85f)
                         )
                     }
                 }
 
-                // --- 2. BARRA VERTICAL DE PROGRESO (Idéntica al ejemplo) ---
+                // --- BARRA DE PROGRESO ---
                 val totalItems = comandasHoy.size
                 if (totalItems > 1) {
                     val barWidth = 4.dp
